@@ -20,41 +20,41 @@ mod renderer_tests {
             width,
             height,
             angle: 0.0,
-            strokeColor: "#000000".to_string(),
-            backgroundColor: "none".to_string(),
-            fillStyle: "hachure".to_string(),
-            strokeWidth: 1.0,
-            strokeStyle: "solid".to_string(),
+            stroke_color: "#000000".to_string(),
+            background_color: "none".to_string(),
+            fill_style: "solid".to_string(),
+            stroke_width: 1.0,
+            stroke_style: "solid".to_string(),
             roughness: 0.0,
             opacity: 100.0,
-            groupIds: vec![],
-            frameId: None,
+            group_ids: vec![],
+            frame_id: None,
             index: "a0".to_string(),
             roundness: None,
             seed: 0,
-            versionNonce: Some(0),
-            isDeleted: false,
-            boundElements: None,
+            version_nonce: Some(0),
+            is_deleted: false,
+            bound_elements: None,
             updated: 0,
             link: None,
             locked: false,
             text: None,
-            fontSize: None,
-            fontFamily: None,
-            textAlign: None,
-            verticalAlign: None,
-            containerId: None,
-            originalText: None,
-            lineHeight: None,
+            font_size: None,
+            font_family: None,
+            text_align: None,
+            vertical_align: None,
+            container_id: None,
+            original_text: None,
+            line_height: None,
             baseline: None,
-            startBinding: None,
-            endBinding: None,
-            startArrowType: None,
-            endArrowType: None,
-            startArrowhead: None,
-            endArrowhead: None,
+            start_binding: None,
+            end_binding: None,
+            start_arrow_type: None,
+            end_arrow_type: None,
+            start_arrowhead: None,
+            end_arrowhead: None,
             points: None,
-            lastCommittedPoint: None,
+            last_committed_point: None,
             elbowed: None,
             version: None,
         }
@@ -86,7 +86,7 @@ mod renderer_tests {
     fn test_calculate_viewbox_ignores_deleted() {
         let element1 = create_test_element("rect1", "rectangle", 100.0, 100.0, 200.0, 150.0);
         let mut element2 = create_test_element("rect2", "rectangle", 500.0, 500.0, 100.0, 100.0);
-        element2.isDeleted = true;
+        element2.is_deleted = true;
 
         let elements = vec![element1, element2];
         let viewbox = calculate_viewbox(&elements);
@@ -103,11 +103,11 @@ mod renderer_tests {
         let element = create_test_element("rect1", "rectangle", 100.0, 100.0, 200.0, 150.0);
         let data = ExcalidrawData {
             data_type: "excalidraw".to_string(),
-            version: 2,
-            versionNonce: None,
-            source: "test".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
             elements: vec![element],
-            appState: HashMap::new(),
+            app_state: HashMap::new(),
             files: HashMap::new(),
         };
 
@@ -124,11 +124,11 @@ mod renderer_tests {
     fn test_generate_svg_empty() {
         let data = ExcalidrawData {
             data_type: "excalidraw".to_string(),
-            version: 2,
-            versionNonce: None,
-            source: "test".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
             elements: vec![],
-            appState: HashMap::new(),
+            app_state: HashMap::new(),
             files: HashMap::new(),
         };
 
@@ -142,16 +142,16 @@ mod renderer_tests {
     #[test]
     fn test_rectangle_rendering() {
         let mut element = create_test_element("rect1", "rectangle", 100.0, 100.0, 200.0, 150.0);
-        element.strokeColor = "#ff0000".to_string();
-        element.backgroundColor = "#00ff00".to_string();
+        element.stroke_color = "#ff0000".to_string();
+        element.background_color = "#00ff00".to_string();
 
         let data = ExcalidrawData {
             data_type: "excalidraw".to_string(),
-            version: 2,
-            versionNonce: None,
-            source: "test".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
             elements: vec![element],
-            appState: HashMap::new(),
+            app_state: HashMap::new(),
             files: HashMap::new(),
         };
 
@@ -166,11 +166,11 @@ mod renderer_tests {
         let element = create_test_element("circle1", "ellipse", 200.0, 200.0, 100.0, 100.0);
         let data = ExcalidrawData {
             data_type: "excalidraw".to_string(),
-            version: 2,
-            versionNonce: None,
-            source: "test".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
             elements: vec![element],
-            appState: HashMap::new(),
+            app_state: HashMap::new(),
             files: HashMap::new(),
         };
 
@@ -184,15 +184,15 @@ mod renderer_tests {
     fn test_text_rendering() {
         let mut element = create_test_element("text1", "text", 100.0, 100.0, 100.0, 40.0);
         element.text = Some("Hello World".to_string());
-        element.fontSize = Some(16.0);
+        element.font_size = Some(16.0);
 
         let data = ExcalidrawData {
             data_type: "excalidraw".to_string(),
-            version: 2,
-            versionNonce: None,
-            source: "test".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
             elements: vec![element],
-            appState: HashMap::new(),
+            app_state: HashMap::new(),
             files: HashMap::new(),
         };
 
@@ -200,4 +200,103 @@ mod renderer_tests {
         assert!(svg.contains("<text"));
         assert!(svg.contains("Hello World"));
     }
+
+    #[test]
+    fn test_transparent_background() {
+        // Test rectangle with transparent background - should have no fill
+        let mut element = create_test_element("rect1", "rectangle", 100.0, 100.0, 200.0, 150.0);
+        element.stroke_color = "#000000".to_string();
+        element.background_color = "transparent".to_string();
+        element.stroke_width = 2.0;
+
+        let data = ExcalidrawData {
+            data_type: "excalidraw".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
+            elements: vec![element],
+            app_state: HashMap::new(),
+            files: HashMap::new(),
+        };
+
+        let svg = generate_svg(&data);
+        assert!(svg.contains("fill=\"none\""), "Rectangle with transparent background should have fill=\"none\"");
+        assert!(svg.contains("stroke=\"#000000\""), "Rectangle should have stroke color");
+    }
+
+    #[test]
+    fn test_transparent_stroke() {
+        // Test rectangle with transparent stroke - should have no stroke
+        let mut element = create_test_element("rect1", "rectangle", 100.0, 100.0, 200.0, 150.0);
+        element.stroke_color = "transparent".to_string();
+        element.background_color = "#ff0000".to_string();
+        element.stroke_width = 0.0;
+
+        let data = ExcalidrawData {
+            data_type: "excalidraw".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
+            elements: vec![element],
+            app_state: HashMap::new(),
+            files: HashMap::new(),
+        };
+
+        let svg = generate_svg(&data);
+        assert!(svg.contains("fill=\"#ff0000\""), "Rectangle should have fill color");
+        assert!(svg.contains("stroke=\"none\""), "Rectangle with transparent stroke should have stroke=\"none\"");
+    }
+
+    #[test]
+    fn test_both_stroke_and_fill() {
+        // Test rectangle with both stroke and fill
+        let mut element = create_test_element("rect1", "rectangle", 100.0, 100.0, 200.0, 150.0);
+        element.stroke_color = "#000000".to_string();
+        element.background_color = "#dbeafe".to_string();
+        element.stroke_width = 2.0;
+
+        let data = ExcalidrawData {
+            data_type: "excalidraw".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
+            elements: vec![element],
+            app_state: HashMap::new(),
+            files: HashMap::new(),
+        };
+
+        let svg = generate_svg(&data);
+        assert!(svg.contains("fill=\"#dbeafe\""), "Rectangle should have fill color");
+        assert!(svg.contains("stroke=\"#000000\""), "Rectangle should have stroke color");
+    }
+
+    #[test]
+    fn test_hachure_fill_style() {
+        // Test rectangle with hachure fill style
+        let mut element = create_test_element("rect1", "rectangle", 0.0, 0.0, 100.0, 100.0);
+        element.fill_style = "hachure".to_string();
+        element.background_color = "#868e96".to_string();
+        element.stroke_color = "#1e1e1e".to_string();
+        element.stroke_width = 2.0;
+
+        let data = ExcalidrawData {
+            data_type: "excalidraw".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
+            elements: vec![element],
+            app_state: HashMap::new(),
+            files: HashMap::new(),
+        };
+
+        let svg = generate_svg(&data);
+        // Should have a pattern path with diagonal lines (multiple M and L commands)
+        assert!(svg.contains("stroke=\"#868e96\""), "Hachure pattern should use backgroundColor as stroke");
+        assert!(svg.contains("fill=\"none\""), "Hachure pattern path should have fill=\"none\"");
+        // Should have border path with stroke color
+        assert!(svg.contains("stroke=\"#1e1e1e\""), "Border should use strokeColor");
+        // Pattern should have multiple line segments
+        assert!(svg.matches("M").count() > 10, "Hachure pattern should have multiple line segments");
+    }
 }
+

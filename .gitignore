@@ -2,6 +2,7 @@
 *.png
 *.excalidraw.json
 my_custom_output.png
+*-target.svg
 invalid.json
 .DS_Store
 *.swp

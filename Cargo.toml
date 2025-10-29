@@ -12,3 +12,16 @@ tiny-skia = "0.11"
 fontdb = "0.16"
 anyhow = "1.0"
 thiserror = "1.0"
+palette = "0.7"
+euclid = "0.22"
+num-traits = "0.2"
+parley = "0.6"
+skrifa = "0.37"
+
+[dependencies.roughr]
+git = "https://github.com/orhanbalci/rough-rs"
+package = "roughr"
+
+[dependencies.rough_tiny_skia]
+git = "https://github.com/orhanbalci/rough-rs"
+package = "rough_tiny_skia"

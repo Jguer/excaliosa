@@ -1,0 +1,12 @@
+/target
+*.png
+*.excalidraw.json
+my_custom_output.png
+invalid.json
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml

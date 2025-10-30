@@ -948,7 +948,11 @@ fn get_font_family_for_id(font_id: Option<i32>) -> &'static str {
     }
 }
 
-pub fn render_to_png(data: &ExcalidrawData, output_path: &std::path::Path) -> Result<()> {
+pub fn render_to_png(
+    data: &ExcalidrawData,
+    output_path: &std::path::Path,
+    background: Option<(u8, u8, u8, u8)>,
+) -> Result<()> {
     let viewbox = calculate_viewbox(&data.elements);
     
     let width = viewbox.width.ceil() as u32;
@@ -956,17 +960,20 @@ pub fn render_to_png(data: &ExcalidrawData, output_path: &std::path::Path) -> Re
     
     let mut pixmap = Pixmap::new(width, height)
         .ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
-    
-    // Fill background with white
-    let mut background_paint = Paint::default();
-    background_paint.set_color_rgba8(255, 255, 255, 255);
-    
-    pixmap.fill_rect(
-        Rect::from_xywh(0.0, 0.0, width as f32, height as f32).unwrap(),
-        &background_paint,
-        Transform::identity(),
-        None,
-    );
+
+    // Fill background if provided (or default to white if None)
+    if let Some((r, g, b, a)) = background.or(Some((255, 255, 255, 255))) {
+        if a > 0 {
+            let mut background_paint = Paint::default();
+            background_paint.set_color_rgba8(r, g, b, a);
+            pixmap.fill_rect(
+                Rect::from_xywh(0.0, 0.0, width as f32, height as f32).unwrap(),
+                &background_paint,
+                Transform::identity(),
+                None,
+            );
+        }
+    }
     
     // Create font and layout contexts for text rendering
     let mut font_cx = FontContext::default();

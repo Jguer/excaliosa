@@ -9,7 +9,7 @@ pub const LIBERATION_SANS_REGULAR: &[u8] = include_bytes!("../fonts/LiberationSa
 pub const LIBERATION_SANS_BOLD: &[u8] = include_bytes!("../fonts/LiberationSans-Bold.ttf");
 pub const CASCADIA_CODE: &[u8] = include_bytes!("../fonts/CascadiaCode.ttf");
 
-pub fn convert_svg_to_png(svg_content: &str, output_path: &Path) -> Result<()> {
+pub fn convert_svg_to_png(svg_content: &str, output_path: &Path, background: Option<(u8,u8,u8,u8)>) -> Result<()> {
     // Create font database and load embedded fonts
     let mut fontdb = fontdb::Database::new();
     fontdb.load_font_data(EXCALIFONT_REGULAR.to_vec());
@@ -33,8 +33,19 @@ pub fn convert_svg_to_png(svg_content: &str, output_path: &Path) -> Result<()> {
     let mut pixmap = Pixmap::new(width, height)
         .ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
 
-    // Fill with white background
-    pixmap.fill(tiny_skia::Color::WHITE);
+    // Fill with background (default white if None)
+    if let Some((r,g,b,a)) = background.or(Some((255,255,255,255))) {
+        if a > 0 {
+            let mut paint = tiny_skia::Paint::default();
+            paint.set_color_rgba8(r,g,b,a);
+            pixmap.fill_rect(
+                tiny_skia::Rect::from_xywh(0.0, 0.0, width as f32, height as f32).unwrap(),
+                &paint,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
 
     // Render SVG to pixmap
     resvg::render(

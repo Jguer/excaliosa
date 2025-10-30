@@ -1484,7 +1484,7 @@ fn clip_line_to_rect(x1: f64, y1: f64, x2: f64, y2: f64, rx: f64, ry: f64, rw: f
     }
 }
 
-pub fn generate_svg(data: &ExcalidrawData) -> String {
+pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8,u8,u8,u8)>) -> String {
     let viewbox = calculate_viewbox(&data.elements);
 
     let elements_svg = data
@@ -1495,8 +1495,23 @@ pub fn generate_svg(data: &ExcalidrawData) -> String {
         .join("\n");
 
     let fill_color = "#000000";
+
+    // Optional background rect
+    let bg_rect = if let Some((r,g,b,a)) = background {
+        if a == 0 { String::new() } else {
+            let hex = format!("#{r:02x}{g:02x}{b:02x}");
+            let opacity = (a as f64) / 255.0;
+            format!(
+                "  <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" fill-opacity=\"{:.4}\"/>\n",
+                viewbox.min_x, viewbox.min_y, viewbox.width, viewbox.height, hex, opacity
+            )
+        }
+    } else {
+        String::new()
+    };
+
     format!(
-        "<svg viewBox=\"{} {} {} {}\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n  <defs>\n    <marker id=\"arrowhead\" markerWidth=\"10\" markerHeight=\"10\" refX=\"9\" refY=\"3\" orient=\"auto\">\n      <polygon points=\"0 0, 10 3, 0 6\" fill=\"{}\"/>\n    </marker>\n  </defs>\n  {}\n</svg>",
-        viewbox.min_x, viewbox.min_y, viewbox.width, viewbox.height, fill_color, elements_svg
+        "<svg viewBox=\"{} {} {} {}\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n  <defs>\n    <marker id=\"arrowhead\" markerWidth=\"10\" markerHeight=\"10\" refX=\"9\" refY=\"3\" orient=\"auto\">\n      <polygon points=\"0 0, 10 3, 0 6\" fill=\"{}\"/>\n    </marker>\n  </defs>\n{}  {}\n</svg>",
+        viewbox.min_x, viewbox.min_y, viewbox.width, viewbox.height, fill_color, bg_rect, elements_svg
     )
 }

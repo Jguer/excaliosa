@@ -111,7 +111,7 @@ mod renderer_tests {
             files: HashMap::new(),
         };
 
-        let svg = generate_svg(&data);
+    let svg = generate_svg(&data, None);
 
         assert!(svg.contains("<svg"));
         assert!(svg.contains("viewBox"));
@@ -132,7 +132,7 @@ mod renderer_tests {
             files: HashMap::new(),
         };
 
-        let svg = generate_svg(&data);
+    let svg = generate_svg(&data, None);
 
         assert!(svg.contains("<svg"));
         assert!(svg.contains("viewBox"));
@@ -155,7 +155,7 @@ mod renderer_tests {
             files: HashMap::new(),
         };
 
-        let svg = generate_svg(&data);
+    let svg = generate_svg(&data, None);
         assert!(svg.contains("<rect"));
         assert!(svg.contains("width=\"200\""));
         assert!(svg.contains("height=\"150\""));
@@ -174,7 +174,7 @@ mod renderer_tests {
             files: HashMap::new(),
         };
 
-        let svg = generate_svg(&data);
+    let svg = generate_svg(&data, None);
         assert!(svg.contains("<ellipse"));
         assert!(svg.contains("cx=\"250\""));
         assert!(svg.contains("cy=\"250\""));
@@ -196,7 +196,7 @@ mod renderer_tests {
             files: HashMap::new(),
         };
 
-        let svg = generate_svg(&data);
+    let svg = generate_svg(&data, None);
         assert!(svg.contains("<text"));
         assert!(svg.contains("Hello World"));
     }
@@ -219,7 +219,7 @@ mod renderer_tests {
             files: HashMap::new(),
         };
 
-        let svg = generate_svg(&data);
+    let svg = generate_svg(&data, None);
         assert!(svg.contains("fill=\"none\""), "Rectangle with transparent background should have fill=\"none\"");
         assert!(svg.contains("stroke=\"#000000\""), "Rectangle should have stroke color");
     }
@@ -242,7 +242,7 @@ mod renderer_tests {
             files: HashMap::new(),
         };
 
-        let svg = generate_svg(&data);
+    let svg = generate_svg(&data, None);
         assert!(svg.contains("fill=\"#ff0000\""), "Rectangle should have fill color");
         assert!(svg.contains("stroke=\"none\""), "Rectangle with transparent stroke should have stroke=\"none\"");
     }
@@ -265,7 +265,7 @@ mod renderer_tests {
             files: HashMap::new(),
         };
 
-        let svg = generate_svg(&data);
+    let svg = generate_svg(&data, None);
         assert!(svg.contains("fill=\"#dbeafe\""), "Rectangle should have fill color");
         assert!(svg.contains("stroke=\"#000000\""), "Rectangle should have stroke color");
     }
@@ -289,7 +289,7 @@ mod renderer_tests {
             files: HashMap::new(),
         };
 
-        let svg = generate_svg(&data);
+    let svg = generate_svg(&data, None);
         // Should have a pattern path with diagonal lines (multiple M and L commands)
         assert!(svg.contains("stroke=\"#868e96\""), "Hachure pattern should use backgroundColor as stroke");
         assert!(svg.contains("fill=\"none\""), "Hachure pattern path should have fill=\"none\"");

@@ -799,7 +799,10 @@ fn render_element<'a>(
             }
         }
         "ellipse" => {
-            let ellipse = generator.ellipse::<f32>(x, y, width, height);
+            // rough.js ellipse expects center coordinates (cx, cy) and diameters (width, height)
+            let cx = x + width / 2.0;
+            let cy = y + height / 2.0;
+            let ellipse = generator.ellipse::<f32>(cx, cy, width, height);
             ellipse.draw(pixmap);
         }
         "diamond" => {

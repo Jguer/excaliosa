@@ -1,0 +1,9 @@
+target
+.git
+.github
+.gitignore
+**/*.rs.bk
+**/*.swp
+**/*.swo
+node_modules
+*.log

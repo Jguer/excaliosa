@@ -20,6 +20,32 @@ cargo build --release
 
 The binary will be available at `target/release/excaliosa`.
 
+### Docker
+
+You can use the prebuilt container image from the GitHub Container Registry:
+
+```bash
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" -w /work \
+  ghcr.io/jguer/excaliosa:latest examples/arrows.json -o out.png
+```
+
+If you're on a SELinux enabled system, keep the volume flag relabel like `-v "$PWD:/work:z"`.
+
+Examples:
+
+```bash
+# Convert a local JSON diagram to PNG (output next to the file)
+docker run --rm -v "$PWD:/work" -w /work ghcr.io/jguer/excaliosa:latest examples/arrows.json
+
+# Specify an explicit output path
+docker run --rm -v "$PWD:/work" -w /work ghcr.io/jguer/excaliosa:latest examples/arrows.json -o out.png
+
+# Export to SVG
+docker run --rm -v "$PWD:/work" -w /work ghcr.io/jguer/excaliosa:latest examples/arrows.json -o arrows.svg
+```
+
 ## Usage
 
 ### Basic Usage

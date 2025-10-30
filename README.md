@@ -2,7 +2,7 @@
 
 # Excaliosa
 
-It's Excaliosa not Excaliosaaa.
+_It's ExcaliOsa not ExcalioSAR._
 
 A Rust CLI tool that converts Excalidraw JSON diagrams to PNG or SVG format. 
 

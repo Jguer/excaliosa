@@ -1,3 +1,5 @@
+![Excaliosa](static/logo.png)
+
 # Excaliosa
 
 It's Excaliosa not Excaliosaaa.

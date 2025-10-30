@@ -298,5 +298,34 @@ mod renderer_tests {
         // Pattern should have multiple line segments
         assert!(svg.matches("M").count() > 10, "Hachure pattern should have multiple line segments");
     }
+
+    #[test]
+    fn test_arrowheads_are_solid_even_when_dotted() {
+        // Create an arrow with dotted stroke and arrowheads
+        let mut element = create_test_element("arrow1", "arrow", 0.0, 0.0, 0.0, 0.0);
+        element.stroke_color = "#000000".to_string();
+        element.stroke_style = "dotted".to_string();
+        element.stroke_width = 2.0;
+        element.points = Some(vec![(0.0, 0.0), (100.0, 0.0)]);
+        element.start_arrowhead = Some("arrow".to_string());
+        element.end_arrowhead = Some("arrow".to_string());
+
+        let data = ExcalidrawData {
+            data_type: "excalidraw".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
+            elements: vec![element],
+            app_state: HashMap::new(),
+            files: HashMap::new(),
+        };
+
+        let svg = generate_svg(&data, None);
+
+        // There should be exactly one stroke-dasharray attribute (on the shaft),
+        // but NOT on arrowheads which should remain solid.
+        let dasharray_count = svg.matches("stroke-dasharray=\"").count();
+        assert_eq!(dasharray_count, 1, "Only the shaft should be dashed, arrowheads must be solid");
+    }
 }
 

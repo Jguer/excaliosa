@@ -1046,7 +1046,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                         background_color: &str,
                         stroke_width: f64,
                         opacity: f64,
-                        dasharray_attr: &str,
                         transform: &str,
                     ) -> String {
                         if points_vec.is_empty() {
@@ -1088,9 +1087,9 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                                     let (x3, y3) = points_vec[1];
                                     let (x4, y4) = points_vec[2];
                                     format!(
-                                        r#"<path d="M {x3} {y3} L {tip_x} {tip_y}" fill="none" stroke="{stroke_color}" stroke-width="{stroke_width}" opacity="{opacity}"{dasharray_attr} transform="{transform}" stroke-linecap="round"/>"#
+                                        r#"<path d="M {x3} {y3} L {tip_x} {tip_y}" fill="none" stroke="{stroke_color}" stroke-width="{stroke_width}" opacity="{opacity}" transform="{transform}" stroke-linecap="round"/>"#
                                     ) + "\n" + &format!(
-                                        r#"<path d="M {x4} {y4} L {tip_x} {tip_y}" fill="none" stroke="{stroke_color}" stroke-width="{stroke_width}" opacity="{opacity}"{dasharray_attr} transform="{transform}" stroke-linecap="round"/>"#
+                                        r#"<path d="M {x4} {y4} L {tip_x} {tip_y}" fill="none" stroke="{stroke_color}" stroke-width="{stroke_width}" opacity="{opacity}" transform="{transform}" stroke-linecap="round"/>"#
                                     )
                                 } else {
                                     String::new()
@@ -1159,7 +1158,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                             background_color,
                             el.stroke_width,
                             opacity,
-                            &dasharray_attr,
                             &transform,
                         );
                         arrowheads_svg.push_str(&arrowhead_svg);
@@ -1186,7 +1184,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                                 background_color,
                                 el.stroke_width,
                                 opacity2,
-                                &dasharray_attr,
                                 &transform,
                             ));
                         }
@@ -1216,7 +1213,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                             background_color,
                             el.stroke_width,
                             opacity,
-                            &dasharray_attr,
                             &transform,
                         ));
 
@@ -1242,7 +1238,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                                 background_color,
                                 el.stroke_width,
                                 opacity2,
-                                &dasharray_attr,
                                 &transform,
                             ));
                         }

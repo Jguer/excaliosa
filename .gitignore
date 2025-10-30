@@ -11,3 +11,4 @@ invalid.json
 .idea/
 .vscode/
 *.iml
+coverage.json

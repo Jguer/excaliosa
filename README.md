@@ -92,19 +92,6 @@ excaliosa examples/logo.json -b transparent -o logo_transparent.png
 excaliosa --help
 ```
 
-## Example Workflow
-
-```bash
-# Create a diagram in Excalidraw
-# Export it as JSON
-
-# Convert to PNG
-excaliosa my_diagram.json
-
-# Or with custom output
-excaliosa my_diagram.json -o diagrams/my_output.png
-```
-
 ## License
 
 MIT

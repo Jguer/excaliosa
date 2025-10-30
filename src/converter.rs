@@ -10,15 +10,18 @@ pub const LIBERATION_SANS_BOLD: &[u8] = include_bytes!("../fonts/LiberationSans-
 pub const CASCADIA_CODE: &[u8] = include_bytes!("../fonts/CascadiaCode.ttf");
 
 pub fn convert_svg_to_png(svg_content: &str, output_path: &Path, background: Option<(u8,u8,u8,u8)>) -> Result<()> {
-    // Create font database and load embedded fonts
+    // Prepare usvg options and load embedded fonts into its font database
+    let mut options = usvg::Options::default();
+    // Build a font database and then assign it to options (options.fontdb is Arc)
     let mut fontdb = fontdb::Database::new();
     fontdb.load_font_data(EXCALIFONT_REGULAR.to_vec());
     fontdb.load_font_data(LIBERATION_SANS_REGULAR.to_vec());
     fontdb.load_font_data(LIBERATION_SANS_BOLD.to_vec());
     fontdb.load_font_data(CASCADIA_CODE.to_vec());
+    options.fontdb = std::sync::Arc::new(fontdb);
 
     // Parse SVG
-    let tree = Tree::from_str(svg_content, &usvg::Options::default(), &fontdb)?;
+    let tree = Tree::from_str(svg_content, &options)?;
 
     // Get dimensions from SVG viewBox or use default
     let size = tree.size();

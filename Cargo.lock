@@ -360,6 +360,7 @@ dependencies = [
  "num-traits",
  "palette",
  "parley",
+ "png",
  "resvg",
  "rough_tiny_skia",
  "roughr",

@@ -488,32 +488,51 @@ impl OutlinePen for TinySkiaPen<'_> {
     }
 }
 
-/// Render text using Parley and tiny-skia
-#[allow(clippy::too_many_arguments)]
-fn render_text<'a>(
-    pixmap: &'a mut PixmapMut<'a>,
-    text: &str,
+/// Context for text rendering operations
+struct TextRenderContext<'a> {
+    font_cx: &'a mut FontContext,
+    layout_cx: &'a mut LayoutContext,
+    custom_fonts: &'a std::collections::HashMap<String, Vec<u8>>,
+}
+
+/// Properties for rendering text
+struct TextProperties {
+    text: String,
     x: f32,
     y: f32,
     font_size: f32,
     color: (u8, u8, u8, u8),
-    font_family: &str,
-    font_cx: &mut FontContext,
-    layout_cx: &mut LayoutContext,
-    custom_fonts: &std::collections::HashMap<String, Vec<u8>>,
-    text_align: Option<&str>,
+    font_family: &'static str,
+    text_align: Option<&'static str>,
     container_width: f32,
+}
+
+/// Render text using Parley and tiny-skia
+fn render_text<'a>(
+    pixmap: &'a mut PixmapMut<'a>,
+    props: &TextProperties,
+    text_ctx: &mut TextRenderContext<'a>,
 ) {
     // Skip empty text
-    if text.is_empty() {
+    if props.text.is_empty() {
         return;
     }
     
     // Check if we have a custom font for this family
-    if let Some(font_data) = custom_fonts.get(font_family) {
+    if let Some(font_data) = text_ctx.custom_fonts.get(props.font_family) {
         // Use skrifa to render directly with our custom font
         if let Ok(font_ref) = ReadFontsRef::new(font_data.as_slice()) {
-            render_text_with_skrifa(pixmap, text, x, y, font_size, color, &font_ref, text_align, container_width);
+            render_text_with_skrifa(
+                pixmap, 
+                &props.text, 
+                props.x, 
+                props.y, 
+                props.font_size, 
+                props.color, 
+                &font_ref, 
+                props.text_align, 
+                props.container_width
+            );
             return;
         }
     }
@@ -521,19 +540,19 @@ fn render_text<'a>(
     let display_scale = 1.0;
     
     // Create a layout builder with parley (fallback to system fonts)
-    let mut builder = layout_cx.ranged_builder(font_cx, text, display_scale, false);
+    let mut builder = text_ctx.layout_cx.ranged_builder(text_ctx.font_cx, &props.text, display_scale, false);
     
     // Set font properties with the specified font family
-    builder.push_default(StyleProperty::FontStack(parley::style::FontStack::Source(font_family.into())));
-    builder.push_default(StyleProperty::FontSize(font_size));
+    builder.push_default(StyleProperty::FontStack(parley::style::FontStack::Source(props.font_family.into())));
+    builder.push_default(StyleProperty::FontSize(props.font_size));
     
     // Build the layout
-    let mut layout = builder.build(text);
+    let mut layout = builder.build(&props.text);
     layout.break_all_lines(None);
     
     // Create pen for rendering
     let mut pen = TinySkiaPen::new(pixmap);
-    let text_color = Color::from_rgba8(color.0, color.1, color.2, color.3);
+    let text_color = Color::from_rgba8(props.color.0, props.color.1, props.color.2, props.color.3);
     
     // Render each glyph run
     for line in layout.lines() {
@@ -558,8 +577,8 @@ fn render_text<'a>(
                     
                     // Render each glyph
                     for glyph in glyph_run.glyphs() {
-                        let glyph_x = x + run_x + glyph.x;
-                        let glyph_y = y + run_y - glyph.y;
+                        let glyph_x = props.x + run_x + glyph.x;
+                        let glyph_y = props.y + run_y - glyph.y;
                         run_x += glyph.advance;
                         
                         let glyph_id = GlyphId::from(glyph.id);
@@ -650,19 +669,22 @@ fn render_text_with_skrifa<'a>(
 fn render_element<'a>(
     pixmap: &'a mut PixmapMut<'a>, 
     element: &Element,
-    offset_x: f32, 
-    offset_y: f32,
-    font_cx: &mut FontContext,
-    layout_cx: &mut LayoutContext,
-    custom_fonts: &std::collections::HashMap<String, Vec<u8>>,
+    offset: (f32, f32),
+    text_ctx: &mut TextRenderContext<'a>,
+    transform: Transform,
 ) {
     if element.is_deleted {
         return;
-    }    // Transform coordinates relative to viewbox
-    let x = (element.x - offset_x as f64) as f32;
-    let y = (element.y - offset_y as f64) as f32;
-    let width = element.width as f32;
-    let height = element.height as f32;
+    }
+    
+    // Extract scale factor from transform (sx for uniform scaling)
+    let scale = transform.sx;
+    
+    // Transform coordinates relative to viewbox and apply scale
+    let x = ((element.x - offset.0 as f64) * scale as f64) as f32;
+    let y = ((element.y - offset.1 as f64) * scale as f64) as f32;
+    let width = (element.width * scale as f64) as f32;
+    let height = (element.height * scale as f64) as f32;
 
     // Parse colors
     let stroke_rgba = parse_color(&element.stroke_color);
@@ -691,7 +713,7 @@ fn render_element<'a>(
             Srgba::from_components((stroke_rgba.0, stroke_rgba.1, stroke_rgba.2, stroke_rgba.3))
                 .into_format(),
         );
-        options_builder.stroke_width(element.stroke_width as f32);
+        options_builder.stroke_width((element.stroke_width * scale as f64) as f32);
     }
     
     if has_fill {
@@ -705,8 +727,9 @@ fn render_element<'a>(
     // Set roughness
     options_builder.roughness(element.roughness as f32);
     options_builder.seed(element.seed as u64);
-    // Stroke dash pattern per strokeStyle
-    if let Some(dash) = exca_stroke_dash(&element.stroke_style, element.stroke_width as f32) {
+    // Stroke dash pattern per strokeStyle (use scaled stroke width)
+    let scaled_stroke_width = (element.stroke_width * scale as f64) as f32;
+    if let Some(dash) = exca_stroke_dash(&element.stroke_style, scaled_stroke_width) {
         // Prefer backend dash support if exposed by roughr
         #[allow(unused_must_use)]
         {
@@ -715,9 +738,10 @@ fn render_element<'a>(
         }
     }
     
-    // DPI for fill weight
-    const DPI: f32 = 96.0;
-    options_builder.fill_weight(DPI * 0.01);
+    // DPI for fill weight (scale with transform)
+    const BASE_DPI: f32 = 96.0;
+    let dpi = BASE_DPI * scale;
+    options_builder.fill_weight(dpi * 0.01);
 
     let options = options_builder.build().unwrap();
     let generator = SkiaGenerator::new(options);
@@ -729,12 +753,12 @@ fn render_element<'a>(
             Srgba::from_components((stroke_rgba.0, stroke_rgba.1, stroke_rgba.2, stroke_rgba.3))
                 .into_format(),
         );
-        stroke_only_builder.stroke_width(element.stroke_width as f32);
+        stroke_only_builder.stroke_width((element.stroke_width * scale as f64) as f32);
     }
     stroke_only_builder.roughness(element.roughness as f32);
     stroke_only_builder.seed(element.seed as u64);
-    stroke_only_builder.fill_weight(DPI * 0.01);
-    if let Some(dash) = exca_stroke_dash(&element.stroke_style, element.stroke_width as f32) {
+    stroke_only_builder.fill_weight(dpi * 0.01);
+    if let Some(dash) = exca_stroke_dash(&element.stroke_style, scaled_stroke_width) {
         #[allow(unused_must_use)]
         {
             let dash64: Vec<f64> = dash.into_iter().map(|v| v as f64).collect();
@@ -753,15 +777,15 @@ fn render_element<'a>(
             Srgba::from_components((stroke_rgba.0, stroke_rgba.1, stroke_rgba.2, stroke_rgba.3))
                 .into_format(),
         );
-        cap_builder.stroke_width(element.stroke_width as f32);
+        cap_builder.stroke_width((element.stroke_width * scale as f64) as f32);
     }
     cap_builder.roughness(element.roughness as f32);
     cap_builder.seed(element.seed as u64);
-    cap_builder.fill_weight(DPI * 0.01);
+    cap_builder.fill_weight(dpi * 0.01);
     if element.stroke_style == "dotted" {
         #[allow(unused_must_use)]
         {
-            let dash = exca_dotted_cap_dash(element.stroke_width as f32);
+            let dash = exca_dotted_cap_dash(scaled_stroke_width);
             let dash64: Vec<f64> = dash.into_iter().map(|v| v as f64).collect();
             cap_builder.stroke_line_dash(dash64);
         }
@@ -821,16 +845,20 @@ fn render_element<'a>(
         "line" => {
             if let Some(ref points) = element.points {
                 if points.len() >= 2 {
+                    // Scale points coordinates
+                    let scaled_points: Vec<(f64, f64)> = points.iter()
+                        .map(|p| (p.0 * scale as f64, p.1 * scale as f64))
+                        .collect();
                     if element.roundness.is_some() {
-                        if let Some(path_d) = build_catmull_rom_cubic_path(points, x, y) {
+                        if let Some(path_d) = build_catmull_rom_cubic_path(&scaled_points, x, y) {
                             let path = stroke_gen.path::<f32>(path_d);
                             path.draw(pixmap);
                         }
                     } else {
                         // straight polyline via rough path M/L
                         let mut d = String::new();
-                        d.push_str(&format!("M {} {}", x + points[0].0 as f32, y + points[0].1 as f32));
-                        for p in points.iter().skip(1) {
+                        d.push_str(&format!("M {} {}", x + scaled_points[0].0 as f32, y + scaled_points[0].1 as f32));
+                        for p in scaled_points.iter().skip(1) {
                             d.push_str(&format!(" L {} {}", x + p.0 as f32, y + p.1 as f32));
                         }
                         let path = stroke_gen.path::<f32>(d);
@@ -842,22 +870,27 @@ fn render_element<'a>(
         "arrow" => {
             if let Some(ref points) = element.points {
                 if points.len() >= 2 {
+                    // Scale points coordinates
+                    let scaled_points: Vec<(f64, f64)> = points.iter()
+                        .map(|p| (p.0 * scale as f64, p.1 * scale as f64))
+                        .collect();
+                    
                     // Draw curve or polyline depending on style
-                    if element.elbowed.unwrap_or(false) && points.len() >= 3 {
-                        if let Some(path_d) = build_elbow_arrow_cubic_path(points, x, y, 16.0) {
+                    if element.elbowed.unwrap_or(false) && scaled_points.len() >= 3 {
+                        if let Some(path_d) = build_elbow_arrow_cubic_path(&scaled_points, x, y, 16.0 * scale) {
                             let path = stroke_gen.path::<f32>(path_d);
                             path.draw(pixmap);
                         }
-                    } else if element.roundness.is_some() && points.len() >= 2 {
-                        if let Some(path_d) = build_catmull_rom_cubic_path(points, x, y) {
+                    } else if element.roundness.is_some() && scaled_points.len() >= 2 {
+                        if let Some(path_d) = build_catmull_rom_cubic_path(&scaled_points, x, y) {
                             let path = stroke_gen.path::<f32>(path_d);
                             path.draw(pixmap);
                         }
                     } else {
                         // straight polyline via rough path M/L
                         let mut d = String::new();
-                        d.push_str(&format!("M {} {}", x + points[0].0 as f32, y + points[0].1 as f32));
-                        for p in points.iter().skip(1) {
+                        d.push_str(&format!("M {} {}", x + scaled_points[0].0 as f32, y + scaled_points[0].1 as f32));
+                        for p in scaled_points.iter().skip(1) {
                             d.push_str(&format!(" L {} {}", x + p.0 as f32, y + p.1 as f32));
                         }
                         let path = stroke_gen.path::<f32>(d);
@@ -868,11 +901,11 @@ fn render_element<'a>(
                     if let Some(ref start_arrowhead) = element.start_arrowhead {
                         draw_arrowhead_ex(
                             pixmap,
-                            points,
+                            &scaled_points,
                             x,
                             y,
                             stroke_rgba,
-                            element.stroke_width as f32,
+                            scaled_stroke_width,
                             start_arrowhead,
                             "start",
                             &cap_gen,
@@ -883,11 +916,11 @@ fn render_element<'a>(
                     if let Some(ref end_arrowhead) = element.end_arrowhead {
                         draw_arrowhead_ex(
                             pixmap,
-                            points,
+                            &scaled_points,
                             x,
                             y,
                             stroke_rgba,
-                            element.stroke_width as f32,
+                            scaled_stroke_width,
                             end_arrowhead,
                             "end",
                             &cap_gen,
@@ -899,23 +932,28 @@ fn render_element<'a>(
         "text" => {
             // Render text element
             if let Some(ref text) = element.text {
-                let font_size = element.font_size.unwrap_or(20.0) as f32;
+                let font_size = (element.font_size.unwrap_or(20.0) * scale as f64) as f32;
                 let font_family = get_font_family_for_id(element.font_family);
-                let text_align = element.text_align.as_deref();
-                render_text(
-                    pixmap, 
-                    text, 
-                    x, 
-                    y + font_size, 
-                    font_size, 
-                    stroke_rgba, 
-                    font_family, 
-                    font_cx, 
-                    layout_cx, 
-                    custom_fonts,
+                // Convert text_align to &'static str (safe since values are known strings)
+                let text_align: Option<&'static str> = element.text_align.as_deref().and_then(|s| {
+                    match s {
+                        "left" => Some("left"),
+                        "center" => Some("center"),
+                        "right" => Some("right"),
+                        _ => None,
+                    }
+                });
+                let text_props = TextProperties {
+                    text: text.clone(),
+                    x,
+                    y: y + font_size,
+                    font_size,
+                    color: stroke_rgba,
+                    font_family,
                     text_align,
-                    width,
-                );
+                    container_width: width,
+                };
+                render_text(pixmap, &text_props, text_ctx);
             }
         }
         _ => {
@@ -952,11 +990,17 @@ pub fn render_to_png(
     data: &ExcalidrawData,
     output_path: &std::path::Path,
     background: Option<(u8, u8, u8, u8)>,
+    quality: u8,
+    dpi: Option<u32>,
 ) -> Result<()> {
     let viewbox = calculate_viewbox(&data.elements);
     
-    let width = viewbox.width.ceil() as u32;
-    let height = viewbox.height.ceil() as u32;
+    // Calculate scale factor from DPI (assume source is 96 DPI)
+    const SOURCE_DPI: f32 = 96.0;
+    let scale = dpi.map(|d| d as f32 / SOURCE_DPI).unwrap_or(1.0);
+    
+    let width = (viewbox.width * scale as f64).ceil() as u32;
+    let height = (viewbox.height * scale as f64).ceil() as u32;
     
     let mut pixmap = Pixmap::new(width, height)
         .ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
@@ -982,23 +1026,72 @@ pub fn render_to_png(
     // Load custom fonts from the fonts directory
     let custom_fonts = load_custom_fonts();
     
+    // Create transform matrix for scaling
+    let transform = Transform::from_scale(scale, scale);
+    
     // Render each element
     for element in &data.elements {
+        // Create text rendering context for each element to avoid borrowing conflicts
+        let mut text_ctx = TextRenderContext {
+            font_cx: &mut font_cx,
+            layout_cx: &mut layout_cx,
+            custom_fonts: &custom_fonts,
+        };
+        
         render_element(
             &mut pixmap.as_mut(),
             element,
-            viewbox.min_x as f32,
-            viewbox.min_y as f32,
-            &mut font_cx,
-            &mut layout_cx,
-            &custom_fonts,
+            (viewbox.min_x as f32, viewbox.min_y as f32),
+            &mut text_ctx,
+            transform,
         );
     }
     
-    // Save to PNG
-    pixmap
-        .save_png(output_path)
-        .map_err(|e| anyhow::anyhow!("Failed to save PNG: {e}"))?;
+    // Save to PNG with quality control
+    save_png_with_quality(&pixmap, output_path, quality)?;
+    
+    Ok(())
+}
+
+/// Save a pixmap to PNG with compression quality control (0-100).
+/// Maps 0-100 to PNG compression types:
+/// - 0-25: Fast (fastest encoding, larger files)
+/// - 26-75: Default (balanced)
+/// - 76-100: Best (slowest encoding, smallest files)
+fn save_png_with_quality(
+    pixmap: &tiny_skia::Pixmap,
+    output_path: &std::path::Path,
+    quality: u8,
+) -> Result<()> {
+    use std::io::BufWriter;
+    use std::fs::File;
+    
+    let file = File::create(output_path)
+        .map_err(|e| anyhow::anyhow!("Failed to create PNG file: {e}"))?;
+    let writer = BufWriter::new(file);
+    
+    let mut encoder = png::Encoder::new(writer, pixmap.width(), pixmap.height());
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_filter(png::FilterType::Paeth);
+    
+    // Map quality 0-100 to compression type
+    let compression_type = if quality <= 25 {
+        png::Compression::Fast
+    } else if quality <= 75 {
+        png::Compression::Default
+    } else {
+        png::Compression::Best
+    };
+    encoder.set_compression(compression_type);
+    
+    let mut writer = encoder.write_header()
+        .map_err(|e| anyhow::anyhow!("Failed to write PNG header: {e}"))?;
+    
+    // Write RGBA data
+    let data = pixmap.data();
+    writer.write_image_data(data)
+        .map_err(|e| anyhow::anyhow!("Failed to write PNG data: {e}"))?;
     
     Ok(())
 }

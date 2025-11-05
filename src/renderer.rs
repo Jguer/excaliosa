@@ -1,4 +1,5 @@
 use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
+use crate::color_utils::{has_fill, has_stroke};
 use crate::math_utils::catmull_rom_cubics;
 use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
@@ -539,22 +540,17 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
         return String::new();
     }
 
-    // Determine if we should render stroke
-    let has_stroke = !el.stroke_color.is_empty() 
-        && el.stroke_color != "transparent" 
-        && el.stroke_width > 0.0;
+    // Determine if we should render stroke and fill using shared utilities
+    let should_stroke = has_stroke(el);
+    let should_fill = has_fill(el);
     
-    let stroke_color = if has_stroke {
+    let stroke_color = if should_stroke {
         &el.stroke_color
     } else {
         "none"
     };
     
-    // Determine if we should render fill
-    let has_fill = !el.background_color.is_empty() 
-        && el.background_color != "transparent";
-    
-    let background_color = if has_fill {
+    let background_color = if should_fill {
         &el.background_color
     } else {
         "none"
@@ -591,7 +587,7 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
             };
             
             // For non-solid fills, we need two paths: one for the pattern, one for the stroke
-            if fill_style != "solid" && has_fill {
+            if fill_style != "solid" && should_fill {
                 let pattern_path = if fill_style == "hachure" {
                     generate_hachure_pattern(el.x, el.y, el.width, el.height, el.angle)
                 } else {
@@ -610,7 +606,7 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                 };
                 
                 // Border path (stroke only)
-                let border_svg = if has_stroke {
+                let border_svg = if should_stroke {
                     if radius > 0.0 {
                         let path_data = generate_rounded_rect_path(el.x, el.y, el.width, el.height, radius);
                         format!(
@@ -637,7 +633,7 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                     let mut svg_parts = Vec::new();
                     
                     // Fill path (if has fill) - single smooth path with no stroke
-                    if has_fill {
+                    if should_fill {
                         let fill_path = if radius > 0.0 {
                             generate_rounded_rect_path(el.x, el.y, el.width, el.height, radius)
                         } else {
@@ -654,7 +650,7 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                     }
                     
                     // Stroke paths (if has stroke) - multi-pass rough outline with no fill
-                    if has_stroke {
+                    if should_stroke {
                         let rough_paths = generate_rough_rect_paths(el.x, el.y, el.width, el.height, radius, el.roughness, el.seed);
                         for (path_data, path_opacity_multiplier) in rough_paths {
                             let combined_opacity = opacity * path_opacity_multiplier;
@@ -697,7 +693,7 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                 let mut svg_parts = Vec::new();
                 
                 // Fill path (if has fill) - single smooth polygon with no stroke
-                if has_fill {
+                if should_fill {
                     let points_str = points
                         .iter()
                         .map(|(x, y)| format!("{x},{y}"))
@@ -709,7 +705,7 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                 }
                 
                 // Stroke paths (if has stroke) - multi-pass rough outline with no fill
-                if has_stroke {
+                if should_stroke {
                     let rough_paths = generate_rough_polygon_paths(&points, el.roughness, el.seed);
                     for (path_data, path_opacity_multiplier) in rough_paths {
                         let combined_opacity = opacity * path_opacity_multiplier;
@@ -747,14 +743,14 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                 let mut svg_parts = Vec::new();
                 
                 // Fill path (if has fill) - single smooth ellipse with no stroke
-                if has_fill {
+                if should_fill {
                     svg_parts.push(format!(
                         r#"<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="{background_color}" stroke="none" opacity="{opacity}" transform="{transform}"/>"#
                     ));
                 }
                 
                 // Stroke paths (if has stroke) - multi-pass rough outline with no fill
-                if has_stroke {
+                if should_stroke {
                     let rough_paths = generate_rough_ellipse_paths(cx, cy, rx, ry, el.roughness, el.seed);
                     for (path_data, path_opacity_multiplier) in rough_paths {
                         let combined_opacity = opacity * path_opacity_multiplier;

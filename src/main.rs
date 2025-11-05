@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use excaliosa::{convert_svg_to_png, generate_svg, render_to_png};
+use excaliosa::{color_utils::parse_color_result, convert_svg_to_png, generate_svg, render_to_png};
 use std::fs;
 use std::path::PathBuf;
 
@@ -45,7 +45,7 @@ fn main() -> Result<()> {
     let bg_rgba: Option<(u8, u8, u8, u8)> = args
         .background
         .as_deref()
-        .map(parse_hex_rgba)
+        .map(|s| parse_color_result(s).map_err(|e| anyhow::anyhow!(e)))
         .transpose()
         .with_context(|| "Invalid --background value. Use #RRGGBB or #RRGGBBAA or 'transparent'.")?;
 
@@ -106,33 +106,4 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Parse a hex color string into RGBA.
-/// Accepts: 
-/// - "transparent" => (0,0,0,0)
-/// - #RRGGBB or RRGGBB
-/// - #RRGGBBAA or RRGGBBAA (AA is alpha)
-fn parse_hex_rgba(s: &str) -> Result<(u8, u8, u8, u8)> {
-    if s.eq_ignore_ascii_case("transparent") {
-        return Ok((0, 0, 0, 0));
-    }
-    let s = s.trim();
-    let hex = if let Some(rest) = s.strip_prefix('#') { rest } else { s };
-    match hex.len() {
-        6 => {
-            let r = u8::from_str_radix(&hex[0..2], 16)?;
-            let g = u8::from_str_radix(&hex[2..4], 16)?;
-            let b = u8::from_str_radix(&hex[4..6], 16)?;
-            Ok((r, g, b, 255))
-        }
-        8 => {
-            let r = u8::from_str_radix(&hex[0..2], 16)?;
-            let g = u8::from_str_radix(&hex[2..4], 16)?;
-            let b = u8::from_str_radix(&hex[4..6], 16)?;
-            let a = u8::from_str_radix(&hex[6..8], 16)?;
-            Ok((r, g, b, a))
-        }
-        _ => anyhow::bail!("Expected 6 or 8 hex digits (RRGGBB or RRGGBBAA)"),
-    }
 }

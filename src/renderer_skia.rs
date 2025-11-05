@@ -3,6 +3,7 @@ use crate::models::{ExcalidrawData, ExcalidrawElement as Element};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
 use crate::font_utils::get_font_family;
+use crate::stroke_utils::{get_stroke_dash_array, get_dotted_cap_dash_array};
 use crate::utils::{calculate_viewbox, save_png_with_quality};
 use anyhow::Result;
 use euclid::default::Point2D;
@@ -27,30 +28,6 @@ fn parse_color(color_str: &str) -> (u8, u8, u8, u8) {
         // Default to black
         (0, 0, 0, 255)
     }
-}
-
-// Note: Arrowhead size and angle constants are now in arrow_utils module
-
-/// Compute stroke dash pattern based on Excalidraw's strokeStyle and strokeWidth
-/// Matches packages/element/src/shape.ts getDashArrayDashed/Dotted
-fn exca_stroke_dash(stroke_style: &str, stroke_width: f32) -> Option<Vec<f32>> {
-    match stroke_style {
-        "dashed" => {
-            // [8, 8 + strokeWidth]
-            Some(vec![8.0, 8.0 + stroke_width.max(0.0)])
-        }
-        "dotted" => {
-            // [1.5, 6 + strokeWidth]
-            Some(vec![1.5, 6.0 + stroke_width.max(0.0)])
-        }
-        _ => None,
-    }
-}
-
-/// Dotted dash pattern for arrow caps uses strokeWidth-1 (see shape.ts)
-fn exca_dotted_cap_dash(stroke_width: f32) -> Vec<f32> {
-    let adj = (stroke_width - 1.0).max(0.0);
-    vec![1.5, 6.0 + adj]
 }
 
 // Build Catmull–Rom cubic segments in absolute coords
@@ -84,8 +61,6 @@ fn catmull_rom_cubics_abs(points: &[(f64, f64)], x: f32, y: f32) -> Vec<((f32, f
     }
     segs
 }
-
-// Note: cubic_point and rotate_point are now in arrow_utils module
 
 // Compute arrowhead points as per Excalidraw using Catmull-Rom cubics for accurate direction
 fn exca_arrowhead_points(
@@ -618,12 +593,11 @@ fn render_element<'a, 'b: 'a>(
     options_builder.seed(element.seed as u64);
     // Stroke dash pattern per strokeStyle (use scaled stroke width)
     let scaled_stroke_width = (element.stroke_width * scale as f64) as f32;
-    if let Some(dash) = exca_stroke_dash(&element.stroke_style, scaled_stroke_width) {
+    if let Some(dash) = get_stroke_dash_array(&element.stroke_style, scaled_stroke_width as f64) {
         // Prefer backend dash support if exposed by roughr
         #[allow(unused_must_use)]
         {
-            let dash64: Vec<f64> = dash.into_iter().map(|v| v as f64).collect();
-            options_builder.stroke_line_dash(dash64);
+            options_builder.stroke_line_dash(dash);
         }
     }
     
@@ -647,11 +621,10 @@ fn render_element<'a, 'b: 'a>(
     stroke_only_builder.roughness(element.roughness as f32);
     stroke_only_builder.seed(element.seed as u64);
     stroke_only_builder.fill_weight(dpi * 0.01);
-    if let Some(dash) = exca_stroke_dash(&element.stroke_style, scaled_stroke_width) {
+    if let Some(dash) = get_stroke_dash_array(&element.stroke_style, scaled_stroke_width as f64) {
         #[allow(unused_must_use)]
         {
-            let dash64: Vec<f64> = dash.into_iter().map(|v| v as f64).collect();
-            stroke_only_builder.stroke_line_dash(dash64);
+            stroke_only_builder.stroke_line_dash(dash);
         }
     }
     let stroke_only_options = stroke_only_builder.build().unwrap();
@@ -674,9 +647,8 @@ fn render_element<'a, 'b: 'a>(
     if element.stroke_style == "dotted" {
         #[allow(unused_must_use)]
         {
-            let dash = exca_dotted_cap_dash(scaled_stroke_width);
-            let dash64: Vec<f64> = dash.into_iter().map(|v| v as f64).collect();
-            cap_builder.stroke_line_dash(dash64);
+            let dash = get_dotted_cap_dash_array(scaled_stroke_width as f64);
+            cap_builder.stroke_line_dash(dash);
         }
     }
     let cap_gen = SkiaGenerator::new(cap_builder.build().unwrap());

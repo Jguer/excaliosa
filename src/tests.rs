@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod renderer_tests {
     use crate::models::{ExcalidrawData, ExcalidrawElement};
-    use crate::renderer::{calculate_viewbox, generate_svg};
+    use crate::renderer::generate_svg;
+    use crate::utils::calculate_viewbox;
     use std::collections::HashMap;
 
     fn create_test_element(

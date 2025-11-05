@@ -8,8 +8,9 @@ pub mod utils;
 
 pub use converter::convert_svg_to_png;
 pub use models::{ExcalidrawData, ExcalidrawElement};
-pub use renderer::{calculate_viewbox, generate_svg};
+pub use renderer::generate_svg;
 pub use renderer_skia::render_to_png;
+pub use utils::calculate_viewbox;
 
 #[cfg(test)]
 mod tests;

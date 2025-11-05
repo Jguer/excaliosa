@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 use tiny_skia::Pixmap;
+use crate::models::{ExcalidrawElement, ViewBox};
 
 /// Save a pixmap to PNG with compression quality control (0-100).
 /// Maps 0-100 to PNG compression types:
@@ -43,5 +44,40 @@ pub fn save_png_with_quality(
         .map_err(|e| anyhow::anyhow!("Failed to write PNG data: {e}"))?;
     
     Ok(())
+}
+
+/// Calculate the viewbox that encompasses all non-deleted elements
+pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
+    const PADDING: f64 = 40.0;
+
+    if elements.is_empty() {
+        return ViewBox {
+            min_x: 0.0,
+            min_y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
+    }
+
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for el in elements {
+        if !el.is_deleted {
+            min_x = min_x.min(el.x);
+            min_y = min_y.min(el.y);
+            max_x = max_x.max(el.x + el.width);
+            max_y = max_y.max(el.y + el.height);
+        }
+    }
+
+    ViewBox {
+        min_x: min_x - PADDING,
+        min_y: min_y - PADDING,
+        width: max_x - min_x + PADDING * 2.0,
+        height: max_y - min_y + PADDING * 2.0,
+    }
 }
 

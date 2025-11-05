@@ -1,8 +1,8 @@
 use crate::arrow_utils::{calc_arrowhead_points, cubic_point};
-use crate::models::{ExcalidrawData, ExcalidrawElement as Element, ViewBox};
+use crate::models::{ExcalidrawData, ExcalidrawElement as Element};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
-use crate::utils::save_png_with_quality;
+use crate::utils::{calculate_viewbox, save_png_with_quality};
 use anyhow::Result;
 use euclid::default::Point2D;
 use palette::Srgba;
@@ -12,39 +12,6 @@ use roughr::core::{FillStyle, OptionsBuilder};
 use skrifa::{GlyphId, MetadataProvider, OutlineGlyph, instance::{LocationRef, NormalizedCoord, Size}, outline::{DrawSettings, OutlinePen}, raw::FontRef as ReadFontsRef};
 use tiny_skia::*;
 
-pub fn calculate_viewbox(elements: &[Element]) -> ViewBox {
-    const PADDING: f64 = 40.0;
-
-    if elements.is_empty() {
-        return ViewBox {
-            min_x: 0.0,
-            min_y: 0.0,
-            width: 800.0,
-            height: 600.0,
-        };
-    }
-
-    let mut min_x = f64::INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
-
-    for el in elements {
-        if !el.is_deleted {
-            min_x = min_x.min(el.x);
-            min_y = min_y.min(el.y);
-            max_x = max_x.max(el.x + el.width);
-            max_y = max_y.max(el.y + el.height);
-        }
-    }
-
-    ViewBox {
-        min_x: min_x - PADDING,
-        min_y: min_y - PADDING,
-        width: max_x - min_x + PADDING * 2.0,
-        height: max_y - min_y + PADDING * 2.0,
-    }
-}
 
 /// Parse hex color string to RGBA components
 fn parse_color(color_str: &str) -> (u8, u8, u8, u8) {

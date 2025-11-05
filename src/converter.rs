@@ -2,6 +2,7 @@ use anyhow::Result;
 use resvg::usvg::{self, Tree};
 use std::path::Path;
 use tiny_skia::Pixmap;
+use crate::utils::save_png_with_quality;
 
 // Include fonts as bytes
 pub const EXCALIFONT_REGULAR: &[u8] = include_bytes!("../fonts/Excalifont-Regular.ttf");
@@ -9,7 +10,7 @@ pub const LIBERATION_SANS_REGULAR: &[u8] = include_bytes!("../fonts/LiberationSa
 pub const LIBERATION_SANS_BOLD: &[u8] = include_bytes!("../fonts/LiberationSans-Bold.ttf");
 pub const CASCADIA_CODE: &[u8] = include_bytes!("../fonts/CascadiaCode.ttf");
 
-pub fn convert_svg_to_png(svg_content: &str, output_path: &Path, background: Option<(u8,u8,u8,u8)>) -> Result<()> {
+pub fn convert_svg_to_png(svg_content: &str, output_path: &Path, background: Option<(u8,u8,u8,u8)>, quality: u8, dpi: Option<u32>) -> Result<()> {
     // Prepare usvg options and load embedded fonts into its font database
     let mut options = usvg::Options::default();
     // Build a font database and then assign it to options (options.fontdb is Arc)
@@ -23,10 +24,14 @@ pub fn convert_svg_to_png(svg_content: &str, output_path: &Path, background: Opt
     // Parse SVG
     let tree = Tree::from_str(svg_content, &options)?;
 
+    // Calculate scale factor from DPI (assume source is 96 DPI)
+    const SOURCE_DPI: f32 = 96.0;
+    let scale = dpi.map(|d| d as f32 / SOURCE_DPI).unwrap_or(1.0);
+
     // Get dimensions from SVG viewBox or use default
     let size = tree.size();
-    let width = size.width().ceil() as u32;
-    let height = size.height().ceil() as u32;
+    let width = (size.width() * scale).ceil() as u32;
+    let height = (size.height() * scale).ceil() as u32;
 
     // Ensure minimum dimensions
     let width = width.max(100);
@@ -50,15 +55,16 @@ pub fn convert_svg_to_png(svg_content: &str, output_path: &Path, background: Opt
         }
     }
 
-    // Render SVG to pixmap
+    // Render SVG to pixmap with scaling transform
+    let transform = tiny_skia::Transform::from_scale(scale, scale);
     resvg::render(
         &tree,
-        tiny_skia::Transform::default(),
+        transform,
         &mut pixmap.as_mut(),
     );
 
-    // Save as PNG
-    pixmap.save_png(output_path)?;
+    // Save as PNG with quality control
+    save_png_with_quality(&pixmap, output_path, quality)?;
 
     Ok(())
 }

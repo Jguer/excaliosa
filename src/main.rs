@@ -24,6 +24,18 @@ struct Args {
     /// Background color hex (e.g. #RRGGBB or #RRGGBBAA). Use "transparent" for full transparency
     #[arg(short = 'b', long = "background", value_name = "HEX")] 
     background: Option<String>,
+
+    /// PNG compression quality (0-100). Higher values produce smaller files but slower encoding.
+    /// 0-25: Fast encoding, 26-75: Balanced, 76-100: Best compression.
+    /// Only applies to PNG output. Default: 75
+    #[arg(short = 'q', long = "quality", value_name = "0-100", default_value = "75", value_parser = clap::value_parser!(u8).range(0..=100))]
+    quality: u8,
+
+    /// Target DPI for output scaling. Assumes source is 96 DPI.
+    /// Lower values reduce output size (e.g., --dpi 48 halves dimensions).
+    /// Only applies to PNG output. Default: None (use original dimensions)
+    #[arg(long = "dpi", value_name = "DPI")]
+    dpi: Option<u32>,
 }
 
 fn main() -> Result<()> {
@@ -77,11 +89,11 @@ fn main() -> Result<()> {
                 // Legacy SVG + resvg approach
                 // Avoid double background: rasterizer will fill background; keep SVG transparent
                 let svg_content = generate_svg(&excalidraw_data, None);
-                convert_svg_to_png(&svg_content, &output_path, bg_rgba)
+                convert_svg_to_png(&svg_content, &output_path, bg_rgba, args.quality, args.dpi)
                     .with_context(|| format!("Failed to convert to PNG: {output_path:?}"))?;
             } else {
                 // Use rough_tiny_skia renderer (direct PNG output)
-                render_to_png(&excalidraw_data, &output_path, bg_rgba)
+                render_to_png(&excalidraw_data, &output_path, bg_rgba, args.quality, args.dpi)
                     .with_context(|| format!("Failed to render PNG: {output_path:?}"))?;
             }
 

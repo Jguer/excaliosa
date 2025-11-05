@@ -1,3 +1,4 @@
+use crate::arrow_utils::{calc_arrowhead_points, cubic_point};
 use crate::models::{ExcalidrawData, ExcalidrawElement as Element, ViewBox};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
 use crate::utils::save_png_with_quality;
@@ -59,24 +60,7 @@ fn parse_color(color_str: &str) -> (u8, u8, u8, u8) {
     }
 }
 
-// Excalidraw-accurate arrowhead sizing
-fn exca_get_arrowhead_size(arrowhead: &str) -> f32 {
-    match arrowhead {
-        "arrow" => 25.0,
-        "diamond" | "diamond_outline" => 12.0,
-        "crowfoot_many" | "crowfoot_one" | "crowfoot_one_or_many" => 20.0,
-        _ => 15.0,
-    }
-}
-
-// Excalidraw-accurate arrowhead angles (degrees)
-fn exca_get_arrowhead_angle(arrowhead: &str) -> f32 {
-    match arrowhead {
-        "bar" => 90.0,
-        "arrow" => 20.0,
-        _ => 25.0,
-    }
-}
+// Note: Arrowhead size and angle constants are now in arrow_utils module
 
 /// Compute stroke dash pattern based on Excalidraw's strokeStyle and strokeWidth
 /// Matches packages/element/src/shape.ts getDashArrayDashed/Dotted
@@ -132,21 +116,9 @@ fn catmull_rom_cubics_abs(points: &[(f64, f64)], x: f32, y: f32) -> Vec<((f32, f
     segs
 }
 
-fn cubic_point(p0:(f32,f32), p1:(f32,f32), p2:(f32,f32), p3:(f32,f32), t:f32) -> (f32,f32) {
-    let u = 1.0 - t;
-    let u2 = u*u; let u3 = u2*u; let t2 = t*t; let t3 = t2*t;
-    let x = u3*p0.0 + 3.0*u2*t*p1.0 + 3.0*u*t2*p2.0 + t3*p3.0;
-    let y = u3*p0.1 + 3.0*u2*t*p1.1 + 3.0*u*t2*p2.1 + t3*p3.1;
-    (x,y)
-}
+// Note: cubic_point and rotate_point are now in arrow_utils module
 
-fn rotate_point(px:f32, py:f32, cx:f32, cy:f32, angle_rad:f32) -> (f32,f32) {
-    let dx = px - cx; let dy = py - cy;
-    let ca = angle_rad.cos(); let sa = angle_rad.sin();
-    (cx + dx*ca - dy*sa, cy + dx*sa + dy*ca)
-}
-
-// Compute arrowhead points as per Excalidraw
+// Compute arrowhead points as per Excalidraw using Catmull-Rom cubics for accurate direction
 fn exca_arrowhead_points(
     points: &[(f64,f64)],
     x: f32,
@@ -161,16 +133,13 @@ fn exca_arrowhead_points(
 
     let (p0,p1,p2,p3) = if position == "start" { cubics[0] } else { *cubics.last().unwrap() };
     // Tip
-    let (x2,y2) = if position == "start" { p0 } else { p3 };
-    // Point near tip
+    let x_tip = if position == "start" { p0.0 } else { p3.0 };
+    let y_tip = if position == "start" { p0.1 } else { p3.1 };
+    // Point near tip for direction calculation
     let t = if position == "start" { 0.3 } else { 0.7 };
-    let (x1,y1) = cubic_point(p0,p1,p2,p3,t);
-    let dx = x2 - x1; let dy = y2 - y1; let dist = (dx*dx + dy*dy).sqrt();
-    if dist < 1e-3 { return None; }
-    let nx = dx / dist; let ny = dy / dist;
-
-    let size = exca_get_arrowhead_size(arrowhead);
-    // segment length from element points (local)
+    let (x_near_tip, y_near_tip) = cubic_point(p0, p1, p2, p3, t);
+    
+    // Calculate segment length from element points (local)
     let seg_len = if position == "end" {
         if points.len() >= 2 {
             let a = points[points.len()-1]; let b = points[points.len()-2];
@@ -180,40 +149,17 @@ fn exca_arrowhead_points(
         let a = points[0]; let b = points[1];
         ((a.0-b.0).powi(2) + (a.1-b.1).powi(2)).sqrt() as f32
     } else { 0.0 };
-    let length_multiplier = if arrowhead == "diamond" || arrowhead == "diamond_outline" { 0.25 } else { 0.5 };
-    let min_size = size.min(seg_len * length_multiplier);
-    let xs = x2 - nx * min_size; let ys = y2 - ny * min_size;
-
-    match arrowhead {
-        "dot" | "circle" | "circle_outline" => {
-            let diameter = ((ys - y2).powi(2) + (xs - x2).powi(2)).sqrt() + stroke_width - 2.0;
-            Some(vec![x2, y2, diameter])
-        }
-        _ => {
-            let angle_deg = exca_get_arrowhead_angle(arrowhead);
-            let angle = angle_deg.to_radians();
-
-            if arrowhead == "crowfoot_many" || arrowhead == "crowfoot_one_or_many" {
-                // swap (xs,ys) with (x2,y2) and rotate around (xs,ys)
-                let (x3,y3) = rotate_point(x2,y2,xs,ys,-angle);
-                let (x4,y4) = rotate_point(x2,y2,xs,ys, angle);
-                return Some(vec![xs,ys,x3,y3,x4,y4]);
-            }
-
-            let (x3,y3) = rotate_point(xs,ys,x2,y2,-angle);
-            let (x4,y4) = rotate_point(xs,ys,x2,y2, angle);
-
-            if arrowhead == "diamond" || arrowhead == "diamond_outline" {
-                // Opposite point along shaft
-                let ox = x2 - nx * min_size * 2.0;
-                let oy = y2 - ny * min_size * 2.0;
-                return Some(vec![x2,y2,x3,y3,ox,oy,x4,y4]);
-            }
-
-            // default/triangle/bar/arrow
-            Some(vec![x2,y2,x3,y3,x4,y4])
-        }
-    }
+    
+    // Use shared arrowhead calculation with Catmull-Rom derived tip/tail
+    let pts = calc_arrowhead_points(
+        x_near_tip, y_near_tip,
+        x_tip, y_tip,
+        arrowhead,
+        stroke_width,
+        seg_len
+    );
+    
+    Some(pts)
 }
 
 #[allow(clippy::too_many_arguments)]

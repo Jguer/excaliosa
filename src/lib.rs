@@ -1,3 +1,4 @@
+pub mod arrow_utils;
 pub mod converter;
 pub mod models;
 pub mod renderer;

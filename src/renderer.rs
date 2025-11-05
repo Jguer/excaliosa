@@ -1,4 +1,5 @@
-use crate::arrow_utils::calc_arrowhead_points;
+use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
+use crate::math_utils::catmull_rom_cubics;
 use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
 use crate::font_utils::get_font_family;
@@ -32,6 +33,7 @@ impl LcgRng {
     }
 }
 
+
 // Return smoothed SVG path using Catmull–Rom to cubic Bezier conversion.
 // Expects absolute points (x,y). If less than 3 points, fall back to straight segments.
 // This matches Excalidraw's "perfect shape" rendering for curved lines.
@@ -48,40 +50,13 @@ fn catmull_rom_path(points: &[(f64, f64)]) -> String {
         );
     }
 
-    // Helper to get point with endpoint duplication (Catmull-Rom style)
-    let get = |i: isize| -> (f64, f64) {
-        let n = points.len() as isize;
-        let idx = if i < 0 { 0 } else if i >= n { n - 1 } else { i } as usize;
-        points[idx]
-    };
-
+    let cubics = catmull_rom_cubics(points, 0.5);
     let mut d = String::new();
     let (x0, y0) = points[0];
     d.push_str(&format!("M {x0},{y0}"));
 
-    // Catmull-Rom tension parameter (like Excalidraw's default 0.5)
-    let tension = 0.5;
-
-    for i in 0..(points.len() - 1) {
-        let p0 = get(i as isize - 1);
-        let p1 = get(i as isize);
-        let p2 = get(i as isize + 1);
-        let p3 = get(i as isize + 2);
-
-        // Catmull-Rom to cubic Bezier control points
-        // Tangent at p1: (p2 - p0) * tension
-        // Tangent at p2: (p3 - p1) * tension
-        let tangent1_x = (p2.0 - p0.0) * tension;
-        let tangent1_y = (p2.1 - p0.1) * tension;
-        let tangent2_x = (p3.0 - p1.0) * tension;
-        let tangent2_y = (p3.1 - p1.1) * tension;
-
-        let cp1_x = p1.0 + tangent1_x / 3.0;
-        let cp1_y = p1.1 + tangent1_y / 3.0;
-        let cp2_x = p2.0 - tangent2_x / 3.0;
-        let cp2_y = p2.1 - tangent2_y / 3.0;
-
-        d.push_str(&format!(" C {cp1_x},{cp1_y} {cp2_x},{cp2_y} {},{}", p2.0, p2.1));
+    for (_, cp1, cp2, p_end) in cubics {
+        d.push_str(&format!(" C {},{},{},{} {},{}", cp1.0, cp1.1, cp2.0, cp2.1, p_end.0, p_end.1));
     }
     d
 }
@@ -805,17 +780,21 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                     // Absolute points
                     let abs_points: Vec<(f64, f64)> = points.iter().map(|(px, py)| (el.x + px, el.y + py)).collect();
 
-                    // When not elbowed, render as smoothed Catmull–Rom spline, else as polyline
+                    // When not elbowed, render as smoothed Catmull–Rom spline, else as rounded elbow path
                     let elbowed = el.elbowed.unwrap_or(false);
                     let path_data = if elbowed {
-                        format!(
-                            "M {}",
-                            abs_points
-                                .iter()
-                                .map(|(x, y)| format!("{x},{y}"))
-                                .collect::<Vec<_>>()
-                                .join(" L ")
-                        )
+                        build_elbow_arrow_path(&abs_points, 16.0)
+                            .unwrap_or_else(|| {
+                                // Fallback to simple polyline if function fails
+                                format!(
+                                    "M {}",
+                                    abs_points
+                                        .iter()
+                                        .map(|(x, y)| format!("{x},{y}"))
+                                        .collect::<Vec<_>>()
+                                        .join(" L ")
+                                )
+                            })
                     } else {
                         catmull_rom_path(&abs_points)
                     };
@@ -962,14 +941,34 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                             .or(el.end_arrow_type.as_deref())
                             .unwrap_or("arrow");
                         
-                        let (last_rel_x, last_rel_y) = points[points.len() - 1];
-                        let (prev_rel_x, prev_rel_y) = points[points.len() - 2];
-                        let tip_x = el.x + last_rel_x;
-                        let tip_y = el.y + last_rel_y;
-                        let tail_x = el.x + prev_rel_x;
-                        let tail_y = el.y + prev_rel_y;
+                        // Calculate arrowhead direction using shared utility
+                        let (tail_x, tail_y, tip_x, tip_y, segment_length) = if !elbowed && points.len() >= 2 {
+                            // Use Catmull-Rom curve tangent for accurate direction
+                            if let Some(dir) = calculate_arrowhead_direction(points, el.x, el.y, "end", 0.5) {
+                                dir
+                            } else {
+                                // Fallback to straight line
+                                let (last_rel_x, last_rel_y) = points[points.len() - 1];
+                                let (prev_rel_x, prev_rel_y) = points[points.len() - 2];
+                                let tip_x = el.x + last_rel_x;
+                                let tip_y = el.y + last_rel_y;
+                                let tail_x = el.x + prev_rel_x;
+                                let tail_y = el.y + prev_rel_y;
+                                let seg_len = ((tip_x - tail_x).powi(2) + (tip_y - tail_y).powi(2)).sqrt();
+                                (tail_x, tail_y, tip_x, tip_y, seg_len)
+                            }
+                        } else {
+                            // Elbowed or insufficient points - use straight line
+                            let (last_rel_x, last_rel_y) = points[points.len() - 1];
+                            let (prev_rel_x, prev_rel_y) = points[points.len() - 2];
+                            let tip_x = el.x + last_rel_x;
+                            let tip_y = el.y + last_rel_y;
+                            let tail_x = el.x + prev_rel_x;
+                            let tail_y = el.y + prev_rel_y;
+                            let seg_len = ((tip_x - tail_x).powi(2) + (tip_y - tail_y).powi(2)).sqrt();
+                            (tail_x, tail_y, tip_x, tip_y, seg_len)
+                        };
                         
-                        let segment_length = ((tip_x - tail_x).powi(2) + (tip_y - tail_y).powi(2)).sqrt();
                         let pts_vals = calc_arrowhead_points(tail_x, tail_y, tip_x, tip_y, arrowhead_type, el.stroke_width, segment_length);
                         let pts = convert_arrowhead_points(arrowhead_type, pts_vals);
                         
@@ -1018,14 +1017,34 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                             .or(el.start_arrow_type.as_deref())
                             .unwrap_or("arrow");
                         
-                        let (first_rel_x, first_rel_y) = points[0];
-                        let (second_rel_x, second_rel_y) = points[1];
-                        let tip_x = el.x + first_rel_x;
-                        let tip_y = el.y + first_rel_y;
-                        let tail_x = el.x + second_rel_x;
-                        let tail_y = el.y + second_rel_y;
+                        // Calculate arrowhead direction using shared utility
+                        let (tail_x, tail_y, tip_x, tip_y, segment_length) = if !elbowed && points.len() >= 2 {
+                            // Use Catmull-Rom curve tangent for accurate direction
+                            if let Some(dir) = calculate_arrowhead_direction(points, el.x, el.y, "start", 0.5) {
+                                dir
+                            } else {
+                                // Fallback to straight line
+                                let (first_rel_x, first_rel_y) = points[0];
+                                let (second_rel_x, second_rel_y) = points[1];
+                                let tip_x = el.x + first_rel_x;
+                                let tip_y = el.y + first_rel_y;
+                                let tail_x = el.x + second_rel_x;
+                                let tail_y = el.y + second_rel_y;
+                                let seg_len = ((tip_x - tail_x).powi(2) + (tip_y - tail_y).powi(2)).sqrt();
+                                (tail_x, tail_y, tip_x, tip_y, seg_len)
+                            }
+                        } else {
+                            // Elbowed or insufficient points - use straight line
+                            let (first_rel_x, first_rel_y) = points[0];
+                            let (second_rel_x, second_rel_y) = points[1];
+                            let tip_x = el.x + first_rel_x;
+                            let tip_y = el.y + first_rel_y;
+                            let tail_x = el.x + second_rel_x;
+                            let tail_y = el.y + second_rel_y;
+                            let seg_len = ((tip_x - tail_x).powi(2) + (tip_y - tail_y).powi(2)).sqrt();
+                            (tail_x, tail_y, tip_x, tip_y, seg_len)
+                        };
                         
-                        let segment_length = ((tip_x - tail_x).powi(2) + (tip_y - tail_y).powi(2)).sqrt();
                         let pts_vals = calc_arrowhead_points(tail_x, tail_y, tip_x, tip_y, arrowhead_type, el.stroke_width, segment_length);
                         let pts = convert_arrowhead_points(arrowhead_type, pts_vals);
                         

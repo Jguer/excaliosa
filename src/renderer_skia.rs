@@ -1,4 +1,5 @@
-use crate::arrow_utils::{calc_arrowhead_points, cubic_point};
+use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
+use crate::math_utils::catmull_rom_cubics;
 use crate::models::{ExcalidrawData, ExcalidrawElement as Element};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
@@ -30,36 +31,16 @@ fn parse_color(color_str: &str) -> (u8, u8, u8, u8) {
     }
 }
 
+// Type alias for cubic Bezier segment in f32
+type CubicBezierSegmentF32 = ((f32, f32), (f32, f32), (f32, f32), (f32, f32));
+
 // Build Catmull–Rom cubic segments in absolute coords
-#[allow(clippy::type_complexity)]
-fn catmull_rom_cubics_abs(points: &[(f64, f64)], x: f32, y: f32) -> Vec<((f32, f32), (f32, f32), (f32, f32), (f32, f32))> {
-    let n = points.len();
-    if n < 2 { return vec![]; }
-    let abs: Vec<(f32,f32)> = points.iter().map(|(px,py)| (x + *px as f32, y + *py as f32)).collect();
-    if n == 2 {
-        return vec![(abs[0], abs[0], abs[1], abs[1])];
-    }
-    let mut segs = Vec::new();
-    let tension: f32 = 0.5;
-    let get = |i: isize| -> (f32,f32) {
-        let nn = abs.len() as isize;
-        let idx = if i < 0 { 0 } else if i >= nn { nn - 1 } else { i } as usize;
-        abs[idx]
-    };
-    for i in 0..(abs.len() - 1) {
-        let p0 = get(i as isize - 1);
-        let p1 = get(i as isize);
-        let p2 = get(i as isize + 1);
-        let p3 = get(i as isize + 2);
-        let t1x = (p2.0 - p0.0) * tension;
-        let t1y = (p2.1 - p0.1) * tension;
-        let t2x = (p3.0 - p1.0) * tension;
-        let t2y = (p3.1 - p1.1) * tension;
-        let cp1 = (p1.0 + t1x / 3.0, p1.1 + t1y / 3.0);
-        let cp2 = (p2.0 - t2x / 3.0, p2.1 - t2y / 3.0);
-        segs.push((p1, cp1, cp2, p2));
-    }
-    segs
+fn catmull_rom_cubics_abs(points: &[(f64, f64)], x: f32, y: f32) -> Vec<CubicBezierSegmentF32> {
+    let abs: Vec<(f32, f32)> = points.iter()
+        .map(|(px, py)| (x + *px as f32, y + *py as f32))
+        .collect();
+    // Use shared utility (no conversion needed as types match)
+    catmull_rom_cubics(&abs, 0.5f32)
 }
 
 // Compute arrowhead points as per Excalidraw using Catmull-Rom cubics for accurate direction
@@ -72,38 +53,32 @@ fn exca_arrowhead_points(
     position: &str, // "start" or "end"
 ) -> Option<Vec<f32>> {
     if points.is_empty() { return None; }
-    let cubics = catmull_rom_cubics_abs(points, x, y);
-    if cubics.is_empty() { return None; }
-
-    let (p0,p1,p2,p3) = if position == "start" { cubics[0] } else { *cubics.last().unwrap() };
-    // Tip
-    let x_tip = if position == "start" { p0.0 } else { p3.0 };
-    let y_tip = if position == "start" { p0.1 } else { p3.1 };
-    // Point near tip for direction calculation
-    let t = if position == "start" { 0.3 } else { 0.7 };
-    let (x_near_tip, y_near_tip) = cubic_point(p0, p1, p2, p3, t);
     
-    // Calculate segment length from element points (local)
-    let seg_len = if position == "end" {
-        if points.len() >= 2 {
-            let a = points[points.len()-1]; let b = points[points.len()-2];
-            ((a.0-b.0).powi(2) + (a.1-b.1).powi(2)).sqrt() as f32
-        } else { 0.0 }
-    } else if points.len() >= 2 {
-        let a = points[0]; let b = points[1];
-        ((a.0-b.0).powi(2) + (a.1-b.1).powi(2)).sqrt() as f32
-    } else { 0.0 };
+    // Convert f64 points to f32 for the shared utility
+    let points_f32: Vec<(f32, f32)> = points.iter()
+        .map(|(px, py)| (*px as f32, *py as f32))
+        .collect();
     
-    // Use shared arrowhead calculation with Catmull-Rom derived tip/tail
-    let pts = calc_arrowhead_points(
-        x_near_tip, y_near_tip,
-        x_tip, y_tip,
-        arrowhead,
-        stroke_width,
-        seg_len
-    );
-    
-    Some(pts)
+    // Use shared arrowhead direction calculation
+    if let Some((tail_x, tail_y, tip_x, tip_y, seg_len)) = calculate_arrowhead_direction(
+        &points_f32,
+        x,
+        y,
+        position,
+        0.5f32,
+    ) {
+        // Use shared arrowhead calculation with Catmull-Rom derived tip/tail
+        let pts = calc_arrowhead_points(
+            tail_x, tail_y,
+            tip_x, tip_y,
+            arrowhead,
+            stroke_width,
+            seg_len
+        );
+        Some(pts)
+    } else {
+        None
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -193,12 +168,6 @@ fn draw_arrowhead_ex(
 }
 
 
-fn heading_for_point_is_horizontal(p: (f32,f32), prev: (f32,f32)) -> bool {
-    (p.0 - prev.0).abs() >= (p.1 - prev.1).abs()
-}
-
-fn dist2d(a:(f32,f32), b:(f32,f32)) -> f32 { ((a.0-b.0).powi(2) + (a.1-b.1).powi(2)).sqrt() }
-
 /// Build Catmull–Rom cubic path d-string (M + C segments)
 fn build_catmull_rom_cubic_path(points: &[(f64,f64)], x:f32, y:f32) -> Option<String> {
     let segs = catmull_rom_cubics_abs(points, x, y);
@@ -208,64 +177,6 @@ fn build_catmull_rom_cubic_path(points: &[(f64,f64)], x:f32, y:f32) -> Option<St
     for (_, c1, c2, p3) in segs {
         d.push_str(&format!(" C {} {}, {} {}, {} {}", c1.0, c1.1, c2.0, c2.1, p3.0, p3.1));
     }
-    Some(d)
-}
-
-/// Build elbow arrow path with rounded corners, converting Q to cubic C segments
-fn build_elbow_arrow_cubic_path(points:&[(f64,f64)], x:f32, y:f32, max_corner:f32) -> Option<String> {
-    if points.len() < 2 { return None; }
-    if points.len() == 2 {
-        let start = (x + points[0].0 as f32, y + points[0].1 as f32);
-        let end = (x + points[1].0 as f32, y + points[1].1 as f32);
-        let d = format!("M {} {} L {} {}", start.0, start.1, end.0, end.1);
-        return Some(d);
-    }
-    // Build sub-commands: for each middle point, push L, Q control, Q end
-    let mut sub: Vec<(f32,f32)> = Vec::new();
-    for i in 1..(points.len() - 1) {
-        let prev = (points[i - 1].0 as f32, points[i - 1].1 as f32);
-        let curr = (points[i].0 as f32, points[i].1 as f32);
-        let next = (points[i + 1].0 as f32, points[i + 1].1 as f32);
-        let prev_is_h = heading_for_point_is_horizontal(curr, prev);
-        let next_is_h = heading_for_point_is_horizontal(next, curr);
-        let corner = max_corner.min(dist2d(curr,next) * 0.5).min(dist2d(prev,curr) * 0.5);
-
-        // last point before corner
-        if prev_is_h {
-            if prev.0 < curr.0 { sub.push((curr.0 - corner, curr.1)); } else { sub.push((curr.0 + corner, curr.1)); }
-        } else if prev.1 < curr.1 { sub.push((curr.0, curr.1 - corner)); } else { sub.push((curr.0, curr.1 + corner)); }
-
-        // corner control point
-        sub.push((curr.0, curr.1));
-
-        // next segment start after the corner
-        if next_is_h {
-            if next.0 < curr.0 { sub.push((curr.0 - corner, curr.1)); } else { sub.push((curr.0 + corner, curr.1)); }
-        } else if next.1 < curr.1 { sub.push((curr.0, curr.1 - corner)); } else { sub.push((curr.0, curr.1 + corner)); }
-    }
-
-    let start = (x + points[0].0 as f32, y + points[0].1 as f32);
-    let mut d = format!("M {} {}", start.0, start.1);
-    for chunk in sub.chunks(3) {
-        if let [l, q1, q2] = chunk {
-            let l_abs = (x + l.0, y + l.1);
-            let q1_abs = (x + q1.0, y + q1.1);
-            let q2_abs = (x + q2.0, y + q2.1);
-            // Quadratic control q1 => cubic c1,c2
-            let c1 = (
-                l_abs.0 + (2.0_f32 / 3.0_f32) * (q1_abs.0 - l_abs.0),
-                l_abs.1 + (2.0_f32 / 3.0_f32) * (q1_abs.1 - l_abs.1),
-            );
-            let c2 = (
-                q2_abs.0 + (2.0_f32 / 3.0_f32) * (q1_abs.0 - q2_abs.0),
-                q2_abs.1 + (2.0_f32 / 3.0_f32) * (q1_abs.1 - q2_abs.1),
-            );
-            d.push_str(&format!(" L {} {}", l_abs.0, l_abs.1));
-            d.push_str(&format!(" C {} {}, {} {}, {} {}", c1.0, c1.1, c2.0, c2.1, q2_abs.0, q2_abs.1));
-        }
-    }
-    let end = (x + points[points.len() - 1].0 as f32, y + points[points.len() - 1].1 as f32);
-    d.push_str(&format!(" L {} {}", end.0, end.1));
     Some(d)
 }
 
@@ -725,7 +636,12 @@ fn render_element<'a, 'b: 'a>(
                     
                     // Draw curve or polyline depending on style
                     if element.elbowed.unwrap_or(false) && scaled_points.len() >= 3 {
-                        if let Some(path_d) = build_elbow_arrow_cubic_path(&scaled_points, x, y, 16.0 * scale) {
+                        // Convert relative points to absolute
+                        let abs_points: Vec<(f64, f64)> = scaled_points.iter()
+                            .map(|p| (x as f64 + p.0, y as f64 + p.1))
+                            .collect();
+                        
+                        if let Some(path_d) = build_elbow_arrow_path(&abs_points, 16.0 * scale as f64) {
                             let path = stroke_gen.path::<f32>(path_d);
                             path.draw(pixmap);
                         }

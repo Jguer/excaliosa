@@ -59,3 +59,34 @@ where
     (dx * dx + dy * dy).sqrt()
 }
 
+/// Calculate the center point of a rectangle
+/// Used for rotation centers and other geometric calculations
+/// 
+/// # Arguments
+/// * `x` - Left edge of rectangle
+/// * `y` - Top edge of rectangle
+/// * `width` - Width of rectangle
+/// * `height` - Height of rectangle
+/// 
+/// # Returns
+/// (center_x, center_y) tuple
+pub fn calculate_center<T>(x: T, y: T, width: T, height: T) -> (T, T)
+where
+    T: num_traits::Float,
+{
+    (x + width / T::from(2.0).unwrap(), y + height / T::from(2.0).unwrap())
+}
+
+/// Create SVG transform attribute string for rotation
+/// 
+/// # Arguments
+/// * `angle` - Rotation angle in degrees
+/// * `center_x` - X coordinate of rotation center
+/// * `center_y` - Y coordinate of rotation center
+/// 
+/// # Returns
+/// SVG transform attribute string: "rotate(angle center_x center_y)"
+pub fn create_svg_rotate_transform(angle: f64, center_x: f64, center_y: f64) -> String {
+    format!("rotate({} {} {})", angle, center_x, center_y)
+}
+

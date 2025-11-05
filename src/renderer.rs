@@ -1,6 +1,6 @@
 use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
 use crate::color_utils::{has_fill, has_stroke};
-use crate::math_utils::catmull_rom_cubics;
+use crate::math_utils::{calculate_center, catmull_rom_cubics, create_svg_rotate_transform};
 use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
 use crate::font_utils::{
@@ -540,12 +540,9 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
     };
 
     let opacity = el.opacity / 100.0;
-    let transform = format!(
-        "rotate({} {} {})",
-        el.angle,
-        el.x + el.width / 2.0,
-        el.y + el.height / 2.0
-    );
+    // Calculate rotation center and create transform using shared utilities
+    let (center_x, center_y) = calculate_center(el.x, el.y, el.width, el.height);
+    let transform = create_svg_rotate_transform(el.angle, center_x, center_y);
     
     let stroke_dasharray = get_stroke_dasharray_attr(&el.stroke_style, el.stroke_width);
     let dasharray_attr = if stroke_dasharray != "none" {
@@ -714,8 +711,8 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
             }
         }
         "ellipse" => {
-            let cx = el.x + el.width / 2.0;
-            let cy = el.y + el.height / 2.0;
+            // Calculate ellipse center using shared utility
+            let (cx, cy) = calculate_center(el.x, el.y, el.width, el.height);
             let rx = el.width / 2.0;
             let ry = el.height / 2.0;
             
@@ -1205,8 +1202,7 @@ fn generate_hachure_pattern(x: f64, y: f64, width: f64, height: f64, angle: f64)
         
         // Calculate line endpoints in rotated space
         // Start from center of rectangle and offset perpendicular to hachure direction
-        let center_x = x + width / 2.0;
-        let center_y = y + height / 2.0;
+        let (center_x, center_y) = calculate_center(x, y, width, height);
         
         // Perpendicular offset direction
         let perp_x = -sin_angle * offset;

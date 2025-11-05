@@ -1,6 +1,6 @@
 use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
 use crate::color_utils::{has_fill, has_stroke, parse_color};
-use crate::math_utils::catmull_rom_cubics;
+use crate::math_utils::{calculate_center, catmull_rom_cubics};
 use crate::models::{ExcalidrawData, ExcalidrawElement as Element};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
@@ -563,15 +563,15 @@ fn render_element<'a, 'b: 'a>(
         }
         "ellipse" => {
             // rough.js ellipse expects center coordinates (cx, cy) and diameters (width, height)
-            let cx = x + width / 2.0;
-            let cy = y + height / 2.0;
+            // Calculate center using shared utility
+            let (cx, cy) = calculate_center(x, y, width, height);
             let ellipse = generator.ellipse::<f32>(cx, cy, width, height);
             ellipse.draw(pixmap);
         }
         "diamond" => {
             // Create diamond path using polygon
-            let cx = x + width / 2.0;
-            let cy = y + height / 2.0;
+            // Calculate center using shared utility
+            let (cx, cy) = calculate_center(x, y, width, height);
             let points = vec![
                 Point2D::new(cx, y),           // top
                 Point2D::new(x + width, cy),   // right

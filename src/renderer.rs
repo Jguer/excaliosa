@@ -523,7 +523,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
         return String::new();
     }
 
-    // Determine if we should render stroke and fill using shared utilities
     let should_stroke = has_stroke(el);
     let should_fill = has_fill(el);
     
@@ -540,7 +539,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
     };
 
     let opacity = el.opacity / 100.0;
-    // Calculate rotation center and create transform using shared utilities
     let (center_x, center_y) = calculate_center(el.x, el.y, el.width, el.height);
     let transform = create_svg_rotate_transform(el.angle, center_x, center_y);
     
@@ -711,7 +709,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
             }
         }
         "ellipse" => {
-            // Calculate ellipse center using shared utility
             let (cx, cy) = calculate_center(el.x, el.y, el.width, el.height);
             let rx = el.width / 2.0;
             let ry = el.height / 2.0;
@@ -917,7 +914,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                             .or(el.end_arrow_type.as_deref())
                             .unwrap_or("arrow");
                         
-                        // Calculate arrowhead direction using shared utility
                         let (tail_x, tail_y, tip_x, tip_y, segment_length) = if !elbowed && points.len() >= 2 {
                             // Use Catmull-Rom curve tangent for accurate direction
                             if let Some(dir) = calculate_arrowhead_direction(points, el.x, el.y, "end", 0.5) {
@@ -993,7 +989,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                             .or(el.start_arrow_type.as_deref())
                             .unwrap_or("arrow");
                         
-                        // Calculate arrowhead direction using shared utility
                         let (tail_x, tail_y, tip_x, tip_y, segment_length) = if !elbowed && points.len() >= 2 {
                             // Use Catmull-Rom curve tangent for accurate direction
                             if let Some(dir) = calculate_arrowhead_direction(points, el.x, el.y, "start", 0.5) {
@@ -1138,7 +1133,6 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
             let font_family = get_font_family(el.font_family);
             let line_height_px = get_line_height(font_size, el.line_height);
             
-            // Handle text alignment - calculate absolute x position using shared utility
             let x_pos = calculate_text_x_position(el.x, el.width, el.text_align.as_deref());
             let alignment_anchor = get_svg_text_anchor(el.text_align.as_deref());
             

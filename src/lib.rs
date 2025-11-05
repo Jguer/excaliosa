@@ -1,5 +1,6 @@
 pub mod arrow_utils;
 pub mod converter;
+pub mod font_utils;
 pub mod models;
 pub mod rect_utils;
 pub mod renderer;

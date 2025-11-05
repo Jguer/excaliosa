@@ -2,6 +2,7 @@ use crate::arrow_utils::{calc_arrowhead_points, cubic_point};
 use crate::models::{ExcalidrawData, ExcalidrawElement as Element};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
+use crate::font_utils::get_font_family;
 use crate::utils::{calculate_viewbox, save_png_with_quality};
 use anyhow::Result;
 use euclid::default::Point2D;
@@ -808,7 +809,7 @@ fn render_element<'a, 'b: 'a>(
             // Render text element
             if let Some(ref text) = element.text {
                 let font_size = (element.font_size.unwrap_or(20.0) * scale as f64) as f32;
-                let font_family = get_font_family_for_id(element.font_family);
+                let font_family = get_font_family(element.font_family);
                 // Create TextProperties with lifetimes tied to element
                 let text_props = TextProperties {
                     text: text.as_str(),
@@ -844,15 +845,6 @@ fn load_custom_fonts() -> std::collections::HashMap<String, Vec<u8>> {
     fonts
 }
 
-/// Get font family name based on Excalidraw font ID
-/// Maps font IDs to family names that match the loaded fonts
-fn get_font_family_for_id(font_id: Option<i32>) -> &'static str {
-    match font_id {
-        Some(1) => "Liberation Sans",
-        Some(2) => "Cascadia Code",
-        _ => "Excalifont", // Default or ID 0
-    }
-}
 
 pub fn render_to_png(
     data: &ExcalidrawData,

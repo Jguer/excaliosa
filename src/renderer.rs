@@ -1,6 +1,7 @@
 use crate::arrow_utils::calc_arrowhead_points;
 use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
+use crate::font_utils::get_font_family;
 use crate::utils::calculate_viewbox;
 
 // Simple deterministic RNG (LCG) for jitter, seeded by element.seed
@@ -294,13 +295,6 @@ fn generate_rough_ellipse_paths(cx: f64, cy: f64, rx: f64, ry: f64, roughness: f
     paths
 }
 
-fn get_font_family(font_id: Option<i32>) -> &'static str {
-    match font_id {
-        Some(1) => "Liberation Sans",
-        Some(2) => "CascadiaCode",
-        _ => "Excalifont",
-    }
-}
 
 fn get_stroke_dasharray(stroke_style: &str) -> &'static str {
     match stroke_style {

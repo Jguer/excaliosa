@@ -1,6 +1,4 @@
-/// Shared utilities for arrow and arrowhead rendering
-/// This module provides common logic used by both SVG and Skia renderers
-
+/// Shared utilities for arrow and arrowhead rendering.This module provides common logic used by both SVG and Skia renderers
 /// Get arrowhead size based on arrowhead type (in Excalidraw units)
 pub fn get_arrowhead_size(arrowhead: &str) -> f64 {
     match arrowhead {

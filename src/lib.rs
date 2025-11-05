@@ -1,6 +1,7 @@
 pub mod arrow_utils;
 pub mod converter;
 pub mod models;
+pub mod rect_utils;
 pub mod renderer;
 pub mod renderer_skia;
 pub mod utils;

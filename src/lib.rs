@@ -1,4 +1,5 @@
 pub mod arrow_utils;
+pub mod color_utils;
 pub mod converter;
 pub mod font_utils;
 pub mod math_utils;

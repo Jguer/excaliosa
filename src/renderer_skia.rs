@@ -1,4 +1,5 @@
 use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
+use crate::color_utils::{has_fill, has_stroke, parse_color};
 use crate::math_utils::catmull_rom_cubics;
 use crate::models::{ExcalidrawData, ExcalidrawElement as Element};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
@@ -16,20 +17,6 @@ use skrifa::{GlyphId, MetadataProvider, OutlineGlyph, instance::{LocationRef, No
 use tiny_skia::*;
 
 
-/// Parse hex color string to RGBA components
-fn parse_color(color_str: &str) -> (u8, u8, u8, u8) {
-    if color_str.starts_with('#') && color_str.len() == 7 {
-        let r = u8::from_str_radix(&color_str[1..3], 16).unwrap_or(0);
-        let g = u8::from_str_radix(&color_str[3..5], 16).unwrap_or(0);
-        let b = u8::from_str_radix(&color_str[5..7], 16).unwrap_or(0);
-        (r, g, b, 255)
-    } else if color_str == "transparent" || color_str.is_empty() {
-        (0, 0, 0, 0)
-    } else {
-        // Default to black
-        (0, 0, 0, 255)
-    }
-}
 
 // Type alias for cubic Bezier segment in f32
 type CubicBezierSegmentF32 = ((f32, f32), (f32, f32), (f32, f32), (f32, f32));
@@ -461,16 +448,13 @@ fn render_element<'a, 'b: 'a>(
     let width = (element.width * scale as f64) as f32;
     let height = (element.height * scale as f64) as f32;
 
-    // Parse colors
+    // Parse colors using shared utilities
     let stroke_rgba = parse_color(&element.stroke_color);
     let fill_rgba = parse_color(&element.background_color);
 
-    let has_stroke = !element.stroke_color.is_empty() 
-        && element.stroke_color != "transparent" 
-        && element.stroke_width > 0.0;
-    
-    let has_fill = !element.background_color.is_empty() 
-        && element.background_color != "transparent";
+    // Determine stroke and fill using shared utilities
+    let should_stroke = has_stroke(element);
+    let should_fill = has_fill(element);
 
     // Map Excalidraw fill styles to roughr FillStyle
     let fill_style = match element.fill_style.as_str() {
@@ -483,7 +467,7 @@ fn render_element<'a, 'b: 'a>(
     // Create rough options
     let mut options_builder = OptionsBuilder::default();
     
-    if has_stroke {
+    if should_stroke {
         options_builder.stroke(
             Srgba::from_components((stroke_rgba.0, stroke_rgba.1, stroke_rgba.2, stroke_rgba.3))
                 .into_format(),
@@ -491,7 +475,7 @@ fn render_element<'a, 'b: 'a>(
         options_builder.stroke_width((element.stroke_width * scale as f64) as f32);
     }
     
-    if has_fill {
+    if should_fill {
         options_builder.fill(
             Srgba::from_components((fill_rgba.0, fill_rgba.1, fill_rgba.2, fill_rgba.3))
                 .into_format(),
@@ -522,7 +506,7 @@ fn render_element<'a, 'b: 'a>(
 
     // Helper: stroke-only generator for linear/arrow paths to avoid fill paths
     let mut stroke_only_builder = OptionsBuilder::default();
-    if has_stroke {
+    if should_stroke {
         stroke_only_builder.stroke(
             Srgba::from_components((stroke_rgba.0, stroke_rgba.1, stroke_rgba.2, stroke_rgba.3))
                 .into_format(),
@@ -545,7 +529,7 @@ fn render_element<'a, 'b: 'a>(
     // - solid for solid/dashed
     // - dotted with reduced gap for dotted
     let mut cap_builder = OptionsBuilder::default();
-    if has_stroke {
+    if should_stroke {
         cap_builder.stroke(
             Srgba::from_components((stroke_rgba.0, stroke_rgba.1, stroke_rgba.2, stroke_rgba.3))
                 .into_format(),

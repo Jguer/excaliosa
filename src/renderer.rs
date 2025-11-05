@@ -3,7 +3,10 @@ use crate::color_utils::{has_fill, has_stroke};
 use crate::math_utils::catmull_rom_cubics;
 use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
-use crate::font_utils::get_font_family;
+use crate::font_utils::{
+    calculate_text_x_position, get_font_family, get_line_height, get_svg_text_anchor,
+    get_vertical_offset,
+};
 use crate::stroke_utils::get_stroke_dasharray_attr;
 use crate::utils::calculate_viewbox;
 
@@ -274,26 +277,6 @@ fn generate_rough_ellipse_paths(cx: f64, cy: f64, rx: f64, ry: f64, roughness: f
 
 
 
-fn get_text_anchor(text_align: Option<&str>) -> &'static str {
-    match text_align {
-        Some("center") => "middle",
-        Some("right") => "end",
-        Some("left") => "start",
-        _ => "start",
-    }
-}
-
-fn get_vertical_offset(vertical_align: Option<&str>, font_size: f64) -> f64 {
-    match vertical_align {
-        Some("middle") => font_size * 0.35,
-        Some("bottom") => font_size * 0.9,
-        _ => font_size * 0.75,
-    }
-}
-
-fn get_line_height(font_size: f64, line_height: Option<f64>) -> f64 {
-    line_height.unwrap_or(1.25) * font_size
-}
 
 
 /// Generate a single rough line segment using bezier curves (based on rough.js _line)
@@ -1158,16 +1141,9 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
             let font_family = get_font_family(el.font_family);
             let line_height_px = get_line_height(font_size, el.line_height);
             
-            // Handle text alignment - calculate absolute x position
-            let x_pos = if el.text_align.as_deref() == Some("center") {
-                el.x + el.width / 2.0
-            } else if el.text_align.as_deref() == Some("right") {
-                el.x + el.width
-            } else {
-                el.x
-            };
-            
-            let alignment_anchor = get_text_anchor(el.text_align.as_deref());
+            // Handle text alignment - calculate absolute x position using shared utility
+            let x_pos = calculate_text_x_position(el.x, el.width, el.text_align.as_deref());
+            let alignment_anchor = get_svg_text_anchor(el.text_align.as_deref());
             
             // Calculate vertical offset based on font metrics
             let vertical_offset = get_vertical_offset(None, font_size);

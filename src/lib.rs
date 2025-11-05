@@ -5,6 +5,7 @@ pub mod models;
 pub mod rect_utils;
 pub mod renderer;
 pub mod renderer_skia;
+pub mod stroke_utils;
 pub mod utils;
 
 pub use converter::convert_svg_to_png;

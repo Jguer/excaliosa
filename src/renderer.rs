@@ -2,6 +2,7 @@ use crate::arrow_utils::calc_arrowhead_points;
 use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
 use crate::font_utils::get_font_family;
+use crate::stroke_utils::get_stroke_dasharray_attr;
 use crate::utils::calculate_viewbox;
 
 // Simple deterministic RNG (LCG) for jitter, seeded by element.seed
@@ -296,13 +297,6 @@ fn generate_rough_ellipse_paths(cx: f64, cy: f64, rx: f64, ry: f64, roughness: f
 }
 
 
-fn get_stroke_dasharray(stroke_style: &str) -> &'static str {
-    match stroke_style {
-        "dashed" => "8,4",
-        "dotted" => "2,2",
-        _ => "none",
-    }
-}
 
 fn get_text_anchor(text_align: Option<&str>) -> &'static str {
     match text_align {
@@ -599,7 +593,7 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
         el.y + el.height / 2.0
     );
     
-    let stroke_dasharray = get_stroke_dasharray(&el.stroke_style);
+    let stroke_dasharray = get_stroke_dasharray_attr(&el.stroke_style, el.stroke_width);
     let dasharray_attr = if stroke_dasharray != "none" {
         format!(r#" stroke-dasharray="{stroke_dasharray}""#)
     } else {

@@ -1,6 +1,7 @@
 use crate::arrow_utils::{calc_arrowhead_points, cubic_point};
 use crate::models::{ExcalidrawData, ExcalidrawElement as Element, ViewBox};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
+use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
 use crate::utils::save_png_with_quality;
 use anyhow::Result;
 use euclid::default::Point2D;
@@ -248,33 +249,6 @@ fn draw_arrowhead_ex(
     }
 }
 
-// Excalidraw roundness constants/types for rectangles
-const DEFAULT_PROPORTIONAL_RADIUS: f32 = 0.25;
-const DEFAULT_ADAPTIVE_RADIUS: f32 = 32.0;
-const ROUNDNESS_LEGACY: i32 = 1;
-const ROUNDNESS_PROPORTIONAL_RADIUS: i32 = 2;
-const ROUNDNESS_ADAPTIVE_RADIUS: i32 = 3;
-
-/// Calculate corner radius based on Excalidraw's roundness algorithm
-fn get_corner_radius(size: f32, element: &Element) -> f32 {
-    if let Some(ref roundness) = element.roundness {
-        match roundness.roundness_type {
-            ROUNDNESS_PROPORTIONAL_RADIUS | ROUNDNESS_LEGACY => {
-                return size * DEFAULT_PROPORTIONAL_RADIUS;
-            }
-            ROUNDNESS_ADAPTIVE_RADIUS => {
-                let fixed_radius_size = roundness.value.unwrap_or(DEFAULT_ADAPTIVE_RADIUS as f64) as f32;
-                let cutoff_size = fixed_radius_size / DEFAULT_PROPORTIONAL_RADIUS;
-                if size <= cutoff_size {
-                    return size * DEFAULT_PROPORTIONAL_RADIUS;
-                }
-                return fixed_radius_size;
-            }
-            _ => return 0.0,
-        }
-    }
-    0.0
-}
 
 fn heading_for_point_is_horizontal(p: (f32,f32), prev: (f32,f32)) -> bool {
     (p.0 - prev.0).abs() >= (p.1 - prev.1).abs()
@@ -744,23 +718,10 @@ fn render_element<'a, 'b: 'a>(
         "rectangle" => {
             // Check if rectangle has roundness
             if element.roundness.is_some() {
-                let r = get_corner_radius(width.min(height), element);
-                // Create rounded rectangle path using SVG-like path commands with x,y offsets
-                // M (x+r) y L (x+w-r) y Q (x+w) y, (x+w) (y+r) L (x+w) (y+h-r)
-                // Q (x+w) (y+h), (x+w-r) (y+h) L (x+r) (y+h) Q x (y+h), x (y+h-r)
-                // L x (y+r) Q x y, (x+r) y
-                let path_d = format!(
-                    "M {} {} L {} {} Q {} {}, {} {} L {} {} Q {} {}, {} {} L {} {} Q {} {}, {} {} L {} {} Q {} {}, {} {}",
-                    x + r, y,
-                    x + width - r, y,
-                    x + width, y, x + width, y + r,
-                    x + width, y + height - r,
-                    x + width, y + height, x + width - r, y + height,
-                    x + r, y + height,
-                    x, y + height, x, y + height - r,
-                    x, y + r,
-                    x, y, x + r, y
-                );
+                // Convert f32 to f64 for corner radius calculation, then use shared path generation
+                let r = get_corner_radius((width.min(height)) as f64, element) as f32;
+                // Use shared rounded rectangle path generation (uses quadratic curves)
+                let path_d = generate_rounded_rect_path(x as f64, y as f64, width as f64, height as f64, r as f64);
 
                 let rounded_rect = generator.path::<f32>(path_d);
                 rounded_rect.draw(pixmap);

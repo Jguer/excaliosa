@@ -1,38 +1,6 @@
 use crate::arrow_utils::calc_arrowhead_points;
 use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
-
-// Excalidraw roundness constants
-const DEFAULT_PROPORTIONAL_RADIUS: f64 = 0.25;
-const DEFAULT_ADAPTIVE_RADIUS: f64 = 32.0;
-
-// Roundness types
-const ROUNDNESS_LEGACY: i32 = 1;
-const ROUNDNESS_PROPORTIONAL_RADIUS: i32 = 2;
-const ROUNDNESS_ADAPTIVE_RADIUS: i32 = 3;
-
-/// Calculate corner radius based on Excalidraw's roundness algorithm
-/// x: dimension (typically min(width, height) for rectangles)
-/// element: the element with roundness data
-fn get_corner_radius(x: f64, element: &ExcalidrawElement) -> f64 {
-    if let Some(ref roundness) = element.roundness {
-        match roundness.roundness_type {
-            ROUNDNESS_PROPORTIONAL_RADIUS | ROUNDNESS_LEGACY => {
-                return x * DEFAULT_PROPORTIONAL_RADIUS;
-            }
-            ROUNDNESS_ADAPTIVE_RADIUS => {
-                let fixed_radius_size = roundness.value.unwrap_or(DEFAULT_ADAPTIVE_RADIUS);
-                let cutoff_size = fixed_radius_size / DEFAULT_PROPORTIONAL_RADIUS;
-                
-                if x <= cutoff_size {
-                    return x * DEFAULT_PROPORTIONAL_RADIUS;
-                }
-                return fixed_radius_size;
-            }
-            _ => return 0.0,
-        }
-    }
-    0.0
-}
+use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
 
 pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
     const PADDING: f64 = 40.0;
@@ -396,30 +364,6 @@ fn get_line_height(font_size: f64, line_height: Option<f64>) -> f64 {
     line_height.unwrap_or(1.25) * font_size
 }
 
-fn generate_rounded_rect_path(x: f64, y: f64, width: f64, height: f64, radius: f64) -> String {
-    let r = radius.min(width / 2.0).min(height / 2.0);
-    if r <= 0.0 {
-        return format!(
-            "M {} {} L {} {} L {} {} L {} {} Z",
-            x, y,
-            x + width, y,
-            x + width, y + height,
-            x, y + height
-        );
-    }
-    format!(
-        "M {} {} L {} {} A {} {} 0 0 1 {} {} L {} {} A {} {} 0 0 1 {} {} L {} {} A {} {} 0 0 1 {} {} L {} {} A {} {} 0 0 1 {} {} Z",
-        x + r, y,
-        x + width - r, y,
-        r, r, x + width, y + r,
-        x + width, y + height - r,
-        r, r, x + width - r, y + height,
-        x + r, y + height,
-        r, r, x, y + height - r,
-        x, y + r,
-        r, r, x + r, y
-    )
-}
 
 /// Generate a single rough line segment using bezier curves (based on rough.js _line)
 #[allow(clippy::too_many_arguments)]

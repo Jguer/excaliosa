@@ -1,3 +1,4 @@
+use crate::arrow_utils::calc_arrowhead_points;
 use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
 
 // Excalidraw roundness constants
@@ -923,115 +924,36 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                     // Build optional arrowheads at start/end
                     let mut arrowheads_svg = String::new();
 
-                    // Helper functions for arrowhead geometry
-                    fn get_arrowhead_size(arrowhead: &str) -> f64 {
-                        match arrowhead {
-                            "arrow" => 25.0,
-                            "diamond" | "diamond_outline" => 12.0,
-                            "dot" | "circle" | "circle_outline" => 15.0,
-                            "bar" => 15.0,
-                            "triangle" | "triangle_outline" => 15.0,
-                            _ => 15.0,
-                        }
-                    }
-
-                    fn get_arrowhead_angle(arrowhead: &str) -> f64 {
-                        match arrowhead {
-                            "bar" => 90.0,
-                            "arrow" => 20.0,
-                            _ => 25.0,
-                        }
-                    }
-
-                    // Calculate arrowhead points given direction and type
-                    fn calc_arrowhead_points(
-                        x_tail: f64,
-                        y_tail: f64,
-                        x_tip: f64,
-                        y_tip: f64,
-                        arrowhead: &str,
-                        stroke_width: f64,
-                        segment_length: f64,
-                    ) -> Vec<(f64, f64)> {
-                        let dx = x_tip - x_tail;
-                        let dy = y_tip - y_tail;
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        if dist == 0.0 {
-                            return vec![];
-                        }
-
-                        // Normalized direction vector (from tail to tip)
-                        let nx = dx / dist;
-                        let ny = dy / dist;
-
-                        let base_size = get_arrowhead_size(arrowhead);
-                        
-                        // Scale with strokeWidth like Excalidraw
-                        let size_multiplier = 1.0 + (stroke_width - 1.0) * 0.3;
-                        
-                        // Scale down for short segments
-                        let length_mult = if arrowhead == "diamond" || arrowhead == "diamond_outline" {
-                            0.25
-                        } else {
-                            0.5
-                        };
-                        let min_size = (base_size * size_multiplier).min(segment_length * length_mult);
-
-                        // Point on shaft where arrowhead base starts
-                        let xs = x_tip - nx * min_size;
-                        let ys = y_tip - ny * min_size;
-
+                    // Helper to convert shared arrowhead points to Vec<(f64, f64)> format
+                    fn convert_arrowhead_points(arrowhead: &str, vals: Vec<f64>) -> Vec<(f64, f64)> {
                         match arrowhead {
                             "dot" | "circle" | "circle_outline" => {
-                                // Return [center_x, center_y, diameter]
-                                let diameter = ((ys - y_tip).powi(2) + (xs - x_tip).powi(2)).sqrt() + stroke_width - 2.0;
-                                vec![(x_tip, y_tip), (diameter, 0.0)]
+                                if vals.len() >= 3 {
+                                    vec![(vals[0], vals[1]), (vals[2], 0.0)]
+                                } else {
+                                    vec![]
+                                }
                             }
                             "bar" => {
-                                // Perpendicular bar
-                                let angle = get_arrowhead_angle(arrowhead).to_radians();
-                                let cos_a = angle.cos();
-                                let sin_a = angle.sin();
-                                let x3 = xs + (-ny * cos_a - nx * sin_a) * min_size;
-                                let y3 = ys + (nx * cos_a - ny * sin_a) * min_size;
-                                let x4 = xs + (-ny * cos_a + nx * sin_a) * min_size;
-                                let y4 = ys + (nx * cos_a + ny * sin_a) * min_size;
-                                vec![(x3, y3), (x4, y4)]
+                                if vals.len() >= 4 {
+                                    vec![(vals[0], vals[1]), (vals[2], vals[3])]
+                                } else {
+                                    vec![]
+                                }
                             }
-                            "arrow" => {
-                                // Open arrow (two lines)
-                                let angle = get_arrowhead_angle(arrowhead).to_radians();
-                                let cos_a = angle.cos();
-                                let sin_a = angle.sin();
-                                // Rotate backwards direction by +/- angle
-                                let x3 = x_tip + (-nx * cos_a - ny * sin_a) * min_size;
-                                let y3 = y_tip + (-ny * cos_a + nx * sin_a) * min_size;
-                                let x4 = x_tip + (-nx * cos_a + ny * sin_a) * min_size;
-                                let y4 = y_tip + (-ny * cos_a - nx * sin_a) * min_size;
-                                vec![(x_tip, y_tip), (x3, y3), (x4, y4)]
-                            }
-                            "triangle" | "triangle_outline" => {
-                                let angle = get_arrowhead_angle(arrowhead).to_radians();
-                                let cos_a = angle.cos();
-                                let sin_a = angle.sin();
-                                let x3 = xs + (-ny * cos_a - nx * sin_a) * min_size;
-                                let y3 = ys + (nx * cos_a - ny * sin_a) * min_size;
-                                let x4 = xs + (-ny * cos_a + nx * sin_a) * min_size;
-                                let y4 = ys + (nx * cos_a + ny * sin_a) * min_size;
-                                vec![(x_tip, y_tip), (x3, y3), (x4, y4)]
+                            "arrow" | "triangle" | "triangle_outline" => {
+                                if vals.len() >= 6 {
+                                    vec![(vals[0], vals[1]), (vals[2], vals[3]), (vals[4], vals[5])]
+                                } else {
+                                    vec![]
+                                }
                             }
                             "diamond" | "diamond_outline" => {
-                                let angle = get_arrowhead_angle(arrowhead).to_radians();
-                                let cos_a = angle.cos();
-                                let sin_a = angle.sin();
-                                let x3 = xs + (-ny * cos_a - nx * sin_a) * min_size;
-                                let y3 = ys + (nx * cos_a - ny * sin_a) * min_size;
-                                let x4 = xs + (-ny * cos_a + nx * sin_a) * min_size;
-                                let y4 = ys + (nx * cos_a + ny * sin_a) * min_size;
-                                // Point opposite to tip
-                                let ox = x_tip - nx * min_size * 2.0;
-                                let oy = y_tip - ny * min_size * 2.0;
-                                vec![(x_tip, y_tip), (x3, y3), (ox, oy), (x4, y4)]
+                                if vals.len() >= 8 {
+                                    vec![(vals[0], vals[1]), (vals[2], vals[3]), (vals[4], vals[5]), (vals[6], vals[7])]
+                                } else {
+                                    vec![]
+                                }
                             }
                             _ => vec![],
                         }
@@ -1149,7 +1071,8 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                         let tail_y = el.y + prev_rel_y;
                         
                         let segment_length = ((tip_x - tail_x).powi(2) + (tip_y - tail_y).powi(2)).sqrt();
-                        let pts = calc_arrowhead_points(tail_x, tail_y, tip_x, tip_y, arrowhead_type, el.stroke_width, segment_length);
+                        let pts_vals = calc_arrowhead_points(tail_x, tail_y, tip_x, tip_y, arrowhead_type, el.stroke_width, segment_length);
+                        let pts = convert_arrowhead_points(arrowhead_type, pts_vals);
                         
                         let arrowhead_svg = render_arrowhead(
                             arrowhead_type,
@@ -1168,13 +1091,14 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                             let jitter = (0.6 + 0.2 * el.stroke_width) * el.roughness.max(0.0);
                             let jx = rng.range(-jitter, jitter);
                             let jy = rng.range(-jitter, jitter);
-                            let pts_rough = calc_arrowhead_points(
+                            let pts_rough_vals = calc_arrowhead_points(
                                 tail_x + jx, tail_y + jy, 
                                 tip_x + jx, tip_y + jy, 
                                 arrowhead_type, 
                                 el.stroke_width * rng.range(0.95, 1.05), 
                                 segment_length
                             );
+                            let pts_rough = convert_arrowhead_points(arrowhead_type, pts_rough_vals);
                             let opacity2 = (opacity * 0.9).min(1.0);
                             arrowheads_svg.push('\n');
                             arrowheads_svg.push_str(&render_arrowhead(
@@ -1203,7 +1127,8 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                         let tail_y = el.y + second_rel_y;
                         
                         let segment_length = ((tip_x - tail_x).powi(2) + (tip_y - tail_y).powi(2)).sqrt();
-                        let pts = calc_arrowhead_points(tail_x, tail_y, tip_x, tip_y, arrowhead_type, el.stroke_width, segment_length);
+                        let pts_vals = calc_arrowhead_points(tail_x, tail_y, tip_x, tip_y, arrowhead_type, el.stroke_width, segment_length);
+                        let pts = convert_arrowhead_points(arrowhead_type, pts_vals);
                         
                         arrowheads_svg.push('\n');
                         arrowheads_svg.push_str(&render_arrowhead(
@@ -1222,13 +1147,14 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
                             let jitter = (0.6 + 0.2 * el.stroke_width) * el.roughness.max(0.0);
                             let jx = rng.range(-jitter, jitter);
                             let jy = rng.range(-jitter, jitter);
-                            let pts_rough = calc_arrowhead_points(
+                            let pts_rough_vals = calc_arrowhead_points(
                                 tail_x + jx, tail_y + jy, 
                                 tip_x + jx, tip_y + jy, 
                                 arrowhead_type, 
                                 el.stroke_width * rng.range(0.95, 1.05), 
                                 segment_length
                             );
+                            let pts_rough = convert_arrowhead_points(arrowhead_type, pts_rough_vals);
                             let opacity2 = (opacity * 0.9).min(1.0);
                             arrowheads_svg.push('\n');
                             arrowheads_svg.push_str(&render_arrowhead(

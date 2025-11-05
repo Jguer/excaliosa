@@ -4,7 +4,7 @@ use crate::math_utils::catmull_rom_cubics;
 use crate::models::{ExcalidrawData, ExcalidrawElement as Element};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
 use crate::rect_utils::{get_corner_radius, generate_rounded_rect_path};
-use crate::font_utils::get_font_family;
+use crate::font_utils::{calculate_text_x_position_for_line, get_font_family};
 use crate::stroke_utils::{get_stroke_dash_array, get_dotted_cap_dash_array};
 use crate::utils::{calculate_viewbox, save_png_with_quality};
 use anyhow::Result;
@@ -397,12 +397,8 @@ fn render_text_with_skrifa<'a>(
             }
         }
         
-        // Calculate starting X position based on alignment
-        let start_x = match text_align {
-            Some("center") => x + (container_width - line_width) / 2.0,
-            Some("right") => x + container_width - line_width,
-            _ => x, // "left" or default
-        };
+        // Calculate starting X position based on alignment using shared utility
+        let start_x = calculate_text_x_position_for_line(x, container_width, line_width, text_align);
         let mut cursor_x = start_x;
         
         // Render each character in the line

@@ -28,7 +28,7 @@ struct Args {
     /// PNG compression quality (0-100). Higher values produce smaller files but slower encoding.
     /// 0-25: Fast encoding, 26-75: Balanced, 76-100: Best compression.
     /// Only applies to PNG output. Default: 75
-    #[arg(short = 'q', long = "quality", value_name = "0-100", default_value = "75")]
+    #[arg(short = 'q', long = "quality", value_name = "0-100", default_value = "75", value_parser = clap::value_parser!(u8).range(0..=100))]
     quality: u8,
 
     /// Target DPI for output scaling. Assumes source is 96 DPI.
@@ -40,11 +40,6 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-
-    // Validate quality range (0-100)
-    if args.quality > 100 {
-        anyhow::bail!("Quality must be between 0 and 100, got {}", args.quality);
-    }
 
     // Parse optional background color
     let bg_rgba: Option<(u8, u8, u8, u8)> = args

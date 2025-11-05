@@ -2,6 +2,7 @@ pub mod converter;
 pub mod models;
 pub mod renderer;
 pub mod renderer_skia;
+pub mod utils;
 
 pub use converter::convert_svg_to_png;
 pub use models::{ExcalidrawData, ExcalidrawElement};

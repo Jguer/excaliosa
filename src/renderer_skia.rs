@@ -1,5 +1,6 @@
 use crate::models::{ExcalidrawData, ExcalidrawElement as Element, ViewBox};
 use crate::converter::{EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR, CASCADIA_CODE};
+use crate::utils::save_png_with_quality;
 use anyhow::Result;
 use euclid::default::Point2D;
 use palette::Srgba;
@@ -496,21 +497,21 @@ struct TextRenderContext<'a> {
 }
 
 /// Properties for rendering text
-struct TextProperties {
-    text: String,
+struct TextProperties<'a> {
+    text: &'a str,
     x: f32,
     y: f32,
     font_size: f32,
     color: (u8, u8, u8, u8),
     font_family: &'static str,
-    text_align: Option<&'static str>,
+    text_align: Option<&'a str>,
     container_width: f32,
 }
 
 /// Render text using Parley and tiny-skia
 fn render_text<'a>(
     pixmap: &'a mut PixmapMut<'a>,
-    props: &TextProperties,
+    props: &TextProperties<'a>,
     text_ctx: &mut TextRenderContext<'a>,
 ) {
     // Skip empty text
@@ -524,7 +525,7 @@ fn render_text<'a>(
         if let Ok(font_ref) = ReadFontsRef::new(font_data.as_slice()) {
             render_text_with_skrifa(
                 pixmap, 
-                &props.text, 
+                props.text, 
                 props.x, 
                 props.y, 
                 props.font_size, 
@@ -540,14 +541,14 @@ fn render_text<'a>(
     let display_scale = 1.0;
     
     // Create a layout builder with parley (fallback to system fonts)
-    let mut builder = text_ctx.layout_cx.ranged_builder(text_ctx.font_cx, &props.text, display_scale, false);
+    let mut builder = text_ctx.layout_cx.ranged_builder(text_ctx.font_cx, props.text, display_scale, false);
     
     // Set font properties with the specified font family
     builder.push_default(StyleProperty::FontStack(parley::style::FontStack::Source(props.font_family.into())));
     builder.push_default(StyleProperty::FontSize(props.font_size));
     
     // Build the layout
-    let mut layout = builder.build(&props.text);
+    let mut layout = builder.build(props.text);
     layout.break_all_lines(None);
     
     // Create pen for rendering
@@ -666,9 +667,9 @@ fn render_text_with_skrifa<'a>(
     }
 }
 
-fn render_element<'a>(
+fn render_element<'a, 'b: 'a>(
     pixmap: &'a mut PixmapMut<'a>, 
-    element: &Element,
+    element: &'b Element,
     offset: (f32, f32),
     text_ctx: &mut TextRenderContext<'a>,
     transform: Transform,
@@ -934,25 +935,18 @@ fn render_element<'a>(
             if let Some(ref text) = element.text {
                 let font_size = (element.font_size.unwrap_or(20.0) * scale as f64) as f32;
                 let font_family = get_font_family_for_id(element.font_family);
-                // Convert text_align to &'static str (safe since values are known strings)
-                let text_align: Option<&'static str> = element.text_align.as_deref().and_then(|s| {
-                    match s {
-                        "left" => Some("left"),
-                        "center" => Some("center"),
-                        "right" => Some("right"),
-                        _ => None,
-                    }
-                });
+                // Create TextProperties with lifetimes tied to element
                 let text_props = TextProperties {
-                    text: text.clone(),
+                    text: text.as_str(),
                     x,
                     y: y + font_size,
                     font_size,
                     color: stroke_rgba,
                     font_family,
-                    text_align,
+                    text_align: element.text_align.as_deref(),
                     container_width: width,
                 };
+                // Render text - the lifetime is satisfied because text_props only lives for this scope
                 render_text(pixmap, &text_props, text_ctx);
             }
         }
@@ -1049,49 +1043,6 @@ pub fn render_to_png(
     
     // Save to PNG with quality control
     save_png_with_quality(&pixmap, output_path, quality)?;
-    
-    Ok(())
-}
-
-/// Save a pixmap to PNG with compression quality control (0-100).
-/// Maps 0-100 to PNG compression types:
-/// - 0-25: Fast (fastest encoding, larger files)
-/// - 26-75: Default (balanced)
-/// - 76-100: Best (slowest encoding, smallest files)
-fn save_png_with_quality(
-    pixmap: &tiny_skia::Pixmap,
-    output_path: &std::path::Path,
-    quality: u8,
-) -> Result<()> {
-    use std::io::BufWriter;
-    use std::fs::File;
-    
-    let file = File::create(output_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create PNG file: {e}"))?;
-    let writer = BufWriter::new(file);
-    
-    let mut encoder = png::Encoder::new(writer, pixmap.width(), pixmap.height());
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    encoder.set_filter(png::FilterType::Paeth);
-    
-    // Map quality 0-100 to compression type
-    let compression_type = if quality <= 25 {
-        png::Compression::Fast
-    } else if quality <= 75 {
-        png::Compression::Default
-    } else {
-        png::Compression::Best
-    };
-    encoder.set_compression(compression_type);
-    
-    let mut writer = encoder.write_header()
-        .map_err(|e| anyhow::anyhow!("Failed to write PNG header: {e}"))?;
-    
-    // Write RGBA data
-    let data = pixmap.data();
-    writer.write_image_data(data)
-        .map_err(|e| anyhow::anyhow!("Failed to write PNG data: {e}"))?;
     
     Ok(())
 }

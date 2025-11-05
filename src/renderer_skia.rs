@@ -26,7 +26,6 @@ fn catmull_rom_cubics_abs(points: &[(f64, f64)], x: f32, y: f32) -> Vec<CubicBez
     let abs: Vec<(f32, f32)> = points.iter()
         .map(|(px, py)| (x + *px as f32, y + *py as f32))
         .collect();
-    // Use shared utility (no conversion needed as types match)
     catmull_rom_cubics(&abs, 0.5f32)
 }
 
@@ -41,7 +40,6 @@ fn exca_arrowhead_points(
 ) -> Option<Vec<f32>> {
     if points.is_empty() { return None; }
     
-    // Convert f64 points to f32 for the shared utility
     let points_f32: Vec<(f32, f32)> = points.iter()
         .map(|(px, py)| (*px as f32, *py as f32))
         .collect();
@@ -397,7 +395,6 @@ fn render_text_with_skrifa<'a>(
             }
         }
         
-        // Calculate starting X position based on alignment using shared utility
         let start_x = calculate_text_x_position_for_line(x, container_width, line_width, text_align);
         let mut cursor_x = start_x;
         
@@ -444,11 +441,9 @@ fn render_element<'a, 'b: 'a>(
     let width = (element.width * scale as f64) as f32;
     let height = (element.height * scale as f64) as f32;
 
-    // Parse colors using shared utilities
     let stroke_rgba = parse_color(&element.stroke_color);
     let fill_rgba = parse_color(&element.background_color);
 
-    // Determine stroke and fill using shared utilities
     let should_stroke = has_stroke(element);
     let should_fill = has_fill(element);
 
@@ -563,14 +558,12 @@ fn render_element<'a, 'b: 'a>(
         }
         "ellipse" => {
             // rough.js ellipse expects center coordinates (cx, cy) and diameters (width, height)
-            // Calculate center using shared utility
             let (cx, cy) = calculate_center(x, y, width, height);
             let ellipse = generator.ellipse::<f32>(cx, cy, width, height);
             ellipse.draw(pixmap);
         }
         "diamond" => {
             // Create diamond path using polygon
-            // Calculate center using shared utility
             let (cx, cy) = calculate_center(x, y, width, height);
             let points = vec![
                 Point2D::new(cx, y),           // top

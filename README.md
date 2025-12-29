@@ -85,6 +85,14 @@ excaliosa path/to/diagram.json -o diagram.svg
 - -b, --background <HEX>: Background color to apply to the canvas. Accepts `#RRGGBB` or `#RRGGBBAA` (alpha supported), or the literal `transparent`.
 	- Examples: `--background "#ffffff"`, `--background "#121212cc"`, `--background transparent`.
 	- Applies to both PNG and SVG export. For SVG, a full-size background `<rect>` is inserted with `fill-opacity` derived from alpha.
+- -q, --quality <0-100>: PNG compression quality (0-100). Higher values produce smaller files but slower encoding.
+	- 0-25: fast encoding (larger files)
+	- 26-75: balanced (default: 75)
+	- 76-100: best compression (slowest)
+	- Only applies to PNG output.
+- --dpi <DPI>: Target DPI for output scaling (assumes source is 96 DPI).
+	- Lower values reduce output size (e.g. `--dpi 48` halves dimensions).
+	- Only applies to PNG output.
 - -h, --help: Show help and exit.
 
 ### More examples
@@ -110,6 +118,12 @@ excaliosa examples/logo.json -b "#121212cc" -o logo_dark80.png
 
 # Fully transparent background for SVG or PNG (PNG will have transparent pixels)
 excaliosa examples/logo.json -b transparent -o logo_transparent.png
+
+# Control PNG compression quality (higher = smaller file, slower)
+excaliosa examples/logo.json -q 90 -o logo_q90.png
+
+# Scale output via DPI (source is assumed 96 DPI)
+excaliosa examples/logo.json --dpi 144 -o logo_144dpi.png
 ```
 
 ### Help

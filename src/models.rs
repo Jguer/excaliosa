@@ -48,6 +48,13 @@ pub struct ExcalidrawElement {
     pub points: Option<Vec<(f64, f64)>>,
     pub last_committed_point: Option<Vec<f64>>,
     pub elbowed: Option<bool>,
+    // Image element fields (type="image")
+    #[serde(default)]
+    pub file_id: Option<String>,
+    #[serde(default)]
+    pub scale: Option<Vec<f64>>,
+    #[serde(default)]
+    pub crop: Option<serde_json::Value>,
     #[serde(default)]
     pub version: Option<i32>,
 }
@@ -72,8 +79,10 @@ pub struct BoundElement {
 #[serde(rename_all = "camelCase")]
 pub struct Binding {
     pub element_id: String,
-    pub focus: f64,
-    pub gap: f64,
+    #[serde(default)]
+    pub focus: Option<f64>,
+    #[serde(default)]
+    pub gap: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

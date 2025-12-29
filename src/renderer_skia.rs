@@ -8,6 +8,7 @@ use crate::font_utils::{calculate_text_x_position_for_line, get_font_family};
 use crate::stroke_utils::{get_stroke_dash_array, get_dotted_cap_dash_array};
 use crate::utils::{calculate_viewbox, save_png_with_quality};
 use anyhow::Result;
+use base64::Engine;
 use euclid::default::Point2D;
 use palette::Srgba;
 use parley::{FontContext, LayoutContext, StyleProperty};
@@ -15,6 +16,8 @@ use rough_tiny_skia::SkiaGenerator;
 use roughr::core::{FillStyle, OptionsBuilder};
 use skrifa::{GlyphId, MetadataProvider, OutlineGlyph, instance::{LocationRef, NormalizedCoord, Size}, outline::{DrawSettings, OutlinePen}, raw::FontRef as ReadFontsRef};
 use tiny_skia::*;
+use std::collections::HashMap;
+use serde_json::Value;
 
 
 
@@ -427,6 +430,7 @@ fn render_element<'a, 'b: 'a>(
     offset: (f32, f32),
     text_ctx: &mut TextRenderContext<'a>,
     transform: Transform,
+    files: &HashMap<String, Value>,
 ) {
     if element.is_deleted {
         return;
@@ -541,6 +545,82 @@ fn render_element<'a, 'b: 'a>(
 
     // Render based on element type
     match element.element_type.as_str() {
+        "image" => {
+            let Some(file_id) = element.file_id.as_deref() else {
+                return;
+            };
+            let Some(file) = files.get(file_id) else {
+                return;
+            };
+            let Some(data_url) = file.get("dataURL").and_then(|v| v.as_str()) else {
+                return;
+            };
+
+            // Only support embedded PNG data URLs for raster output (keeps deps light).
+            // SVG images are intentionally not allowed.
+            let data_url_trim = data_url.trim();
+            let lower = data_url_trim.to_ascii_lowercase();
+            if !lower.starts_with("data:image/png;") {
+                eprintln!("Skipping non-PNG image dataURL for fileId={file_id}");
+                return;
+            }
+
+            // Parse "data:image/png;base64,...."
+            let Some((meta, b64)) = data_url_trim.split_once(',') else {
+                return;
+            };
+            if !meta.to_ascii_lowercase().contains(";base64") {
+                return;
+            }
+
+            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else {
+                eprintln!("Failed to base64 decode image for fileId={file_id}");
+                return;
+            };
+
+            let img = match Pixmap::decode_png(&bytes) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Failed to decode PNG for fileId={file_id}: {e}");
+                    return;
+                }
+            };
+
+            // Map source image size into element bounds (already scaled by overall transform.sx).
+            let iw = img.width() as f32;
+            let ih = img.height() as f32;
+            if iw <= 0.0 || ih <= 0.0 || width <= 0.0 || height <= 0.0 {
+                return;
+            }
+
+            let sx = width / iw;
+            let sy = height / ih;
+
+            let mut paint = PixmapPaint::default();
+            paint.quality = FilterQuality::Bicubic;
+            paint.opacity = (element.opacity as f32 / 100.0).clamp(0.0, 1.0);
+
+            // Build transform: scale+translate to element box, then rotate around the box center.
+            let cx = x + width / 2.0;
+            let cy = y + height / 2.0;
+
+            let mut ts = Transform::identity();
+            ts = ts.post_scale(sx, sy);
+            ts = ts.post_translate(x, y);
+            if element.angle != 0.0 {
+                ts = ts.post_rotate_at(element.angle as f32, cx, cy);
+            }
+
+            // Use x=0,y=0 and encode all placement into `ts`.
+            pixmap.draw_pixmap(
+                0,
+                0,
+                img.as_ref(),
+                &paint,
+                ts,
+                None,
+            );
+        }
         "rectangle" => {
             // Check if rectangle has roundness
             if element.roundness.is_some() {
@@ -765,6 +845,7 @@ pub fn render_to_png(
             (viewbox.min_x as f32, viewbox.min_y as f32),
             &mut text_ctx,
             transform,
+            &data.files,
         );
     }
     

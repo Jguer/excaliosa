@@ -9,6 +9,7 @@ use crate::font_utils::{
 };
 use crate::stroke_utils::get_stroke_dasharray_attr;
 use crate::utils::calculate_viewbox;
+use std::collections::HashMap;
 
 // Simple deterministic RNG (LCG) for jitter, seeded by element.seed
 struct LcgRng {
@@ -518,7 +519,26 @@ fn generate_rough_rect_paths(
     paths
 }
 
-fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
+fn is_allowed_image_data_url(data_url: &str) -> bool {
+    // Allowlist only raster image data URLs.
+    // Disallow SVG (can contain script/event handlers).
+    let lower = data_url.trim().to_ascii_lowercase();
+    lower.starts_with("data:image/png;")
+        || lower.starts_with("data:image/jpeg;")
+        || lower.starts_with("data:image/jpg;")
+        || lower.starts_with("data:image/gif;")
+        || lower.starts_with("data:image/webp;")
+}
+
+fn get_file_data_url(files: &HashMap<String, serde_json::Value>, file_id: &str) -> Option<String> {
+    files.get(file_id)?.get("dataURL")?.as_str().map(|s| s.to_string())
+}
+
+fn render_element(
+    el: &ExcalidrawElement,
+    _viewbox: &ViewBox,
+    files: &HashMap<String, serde_json::Value>,
+) -> String {
     if el.is_deleted {
         return String::new();
     }
@@ -550,6 +570,33 @@ fn render_element(el: &ExcalidrawElement, _viewbox: &ViewBox) -> String {
     };
 
     match el.element_type.as_str() {
+        "image" => {
+            let opacity = el.opacity / 100.0;
+            let (center_x, center_y) = calculate_center(el.x, el.y, el.width, el.height);
+            let transform = create_svg_rotate_transform(el.angle, center_x, center_y);
+
+            let Some(file_id) = el.file_id.as_deref() else {
+                return String::new();
+            };
+            let Some(data_url) = get_file_data_url(files, file_id) else {
+                return String::new();
+            };
+            if !is_allowed_image_data_url(&data_url) {
+                return String::new();
+            }
+
+            // Stretch to fill element bounds. Excalidraw stores the current rendered size in width/height.
+            format!(
+                r#"<image x="{}" y="{}" width="{}" height="{}" href="{}" opacity="{}" transform="{}" preserveAspectRatio="none"/>"#,
+                el.x,
+                el.y,
+                el.width,
+                el.height,
+                escape_xml(&data_url),
+                opacity,
+                transform
+            )
+        }
         "rectangle" => {
             let fill_style = if el.fill_style.is_empty() {
                 "solid"
@@ -1291,7 +1338,7 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8,u8,u8,u8)>) ->
     let elements_svg = data
         .elements
         .iter()
-        .map(|el| render_element(el, &viewbox))
+        .map(|el| render_element(el, &viewbox, &data.files))
         .collect::<Vec<_>>()
         .join("\n");
 

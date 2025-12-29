@@ -4,6 +4,7 @@ mod renderer_tests {
     use crate::renderer::generate_svg;
     use crate::utils::calculate_viewbox;
     use std::collections::HashMap;
+    use serde_json::json;
 
     fn create_test_element(
         id: &str,
@@ -57,6 +58,9 @@ mod renderer_tests {
             points: None,
             last_committed_point: None,
             elbowed: None,
+            file_id: None,
+            scale: None,
+            crop: None,
             version: None,
         }
     }
@@ -327,6 +331,39 @@ mod renderer_tests {
         // but NOT on arrowheads which should remain solid.
         let dasharray_count = svg.matches("stroke-dasharray=\"").count();
         assert_eq!(dasharray_count, 1, "Only the shaft should be dashed, arrowheads must be solid");
+    }
+
+    #[test]
+    fn test_image_element_renders_as_svg_image() {
+        let mut element = create_test_element("img1", "image", 10.0, 20.0, 100.0, 50.0);
+        element.file_id = Some("file1".to_string());
+
+        let mut files = HashMap::new();
+        files.insert(
+            "file1".to_string(),
+            json!({
+                "mimeType": "image/png",
+                "id": "file1",
+                // minimal valid PNG (1x1 transparent) data URL
+                "dataURL": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/6X7vQAAAABJRU5ErkJggg=="
+            }),
+        );
+
+        let data = ExcalidrawData {
+            data_type: "excalidraw".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
+            elements: vec![element],
+            app_state: HashMap::new(),
+            files,
+        };
+
+        let svg = generate_svg(&data, None);
+        assert!(svg.contains("<image"), "SVG should contain an <image> element");
+        assert!(svg.contains("href=\"data:image/png;base64,"), "SVG image should embed the data URL");
+        assert!(svg.contains("width=\"100\""));
+        assert!(svg.contains("height=\"50\""));
     }
 }
 

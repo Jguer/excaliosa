@@ -727,6 +727,9 @@ fn build_image(
     files: &HashMap<String, Value>,
     image_assets: &mut ImageAssets,
 ) -> Option<ImagePrimitive> {
+    if el.width <= 0.0 || el.height <= 0.0 {
+        return None;
+    }
     let file_id = el.file_id.as_deref()?;
     let asset = image_assets.resolve(file_id, files)?;
     // Negative scale components flip the image on that axis.

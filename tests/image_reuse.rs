@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use excaliosa::scene::{ImagePrimitive, Primitive};
 use excaliosa::{ExcalidrawData, build_scene, generate_svg, render_to_png};
+use serde_json::json;
 
 fn fixture() -> ExcalidrawData {
     serde_json::from_str(include_str!("fixtures/image_reuse.json")).unwrap()
@@ -55,6 +56,36 @@ fn repeated_references_share_assets_and_emit_each_payload_once() {
             .unwrap();
         assert!(svg.contains(&format!("id=\"{id}\"")), "unresolved {id}");
     }
+}
+
+#[test]
+fn non_positive_image_dimensions_emit_no_uses() {
+    for (width, height) in [(-100.0, 50.0), (100.0, -50.0), (0.0, 50.0), (50.0, 0.0)] {
+        let mut data = fixture();
+        data.elements.retain(|element| element.id == "original");
+        data.elements[0].width = width;
+        data.elements[0].height = height;
+
+        let svg = generate_svg(&data, Some((0, 0, 0, 0)));
+        assert!(!svg.contains("<use href=\"#excaliosa-image-asset-"));
+    }
+}
+
+#[test]
+fn rejected_svg_assets_emit_no_definitions_or_uses() {
+    let mut data = fixture();
+    data.elements
+        .retain(|element| element.id == "original" || element.id == "second-asset");
+    for element in &mut data.elements {
+        element.file_id = Some("second".into());
+    }
+    data.files.get_mut("second").unwrap()["dataURL"] = json!("data:image/svg+xml;base64,PHN2Zy8+");
+
+    let svg = generate_svg(&data, Some((0, 0, 0, 0)));
+    assert!(images(&data).is_empty());
+    assert!(!svg.contains("data:image/svg+xml"));
+    assert!(!svg.contains("<image id=\"excaliosa-image-asset-"));
+    assert!(!svg.contains("<use href=\"#excaliosa-image-asset-"));
 }
 
 #[test]

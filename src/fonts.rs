@@ -11,6 +11,14 @@ pub const LIBERATION_SANS_REGULAR: &[u8] = include_bytes!("../fonts/LiberationSa
 pub const CASCADIA_CODE: &[u8] = include_bytes!("../fonts/CascadiaCode.ttf");
 pub const COMIC_SHANNS_REGULAR: &[u8] = include_bytes!("../fonts/ComicShanns-Regular.ttf");
 
+/// Deterministic PNG glyph fallback order; the primary face is searched first.
+pub const BUNDLED_FONT_FALLBACK_ORDER: [&str; 4] = [
+    "Cascadia Code",
+    "Liberation Sans",
+    "Comic Shanns",
+    "Excalifont",
+];
+
 /// Look up the bundled substitute for a scene font family.
 pub fn bundled_font(family: &str) -> BundledFont {
     match family {

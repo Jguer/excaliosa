@@ -13,16 +13,19 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 use crate::arrow_utils::{
-    build_elbow_arrow_path, calc_arrowhead_points, calculate_arrowhead_direction,
+    CARDINALITY_INNER_BAR_OFFSET, CARDINALITY_ONE_OR_MANY_BAR_OFFSET,
+    CARDINALITY_ZERO_CIRCLE_OFFSET, CARDINALITY_ZERO_CIRCLE_SCALE, build_elbow_arrow_path,
+    calc_arrowhead_points_at_size, calculate_arrowhead_direction, normalize_arrowhead,
+    resolve_arrowhead_size,
 };
-use crate::color_utils::{fill_color, has_stroke, parse_color};
+use crate::color_utils::{fill_color, has_stroke, parse_color, parse_color_result};
 use crate::font_utils::{get_font_family, text_metrics};
 use crate::math_utils::calculate_center;
-use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
+use crate::models::{ArrowheadField, ExcalidrawData, ExcalidrawElement, ViewBox};
 use crate::rect_utils::{
     generate_rounded_diamond_path, generate_rounded_rect_path, get_corner_radius,
 };
-use crate::stroke_utils::get_stroke_dash_array;
+use crate::stroke_utils::{get_dotted_cap_dash_array, get_stroke_dash_array};
 use crate::utils::{calculate_viewbox_with_labels, contributes_bounds};
 
 use super::arrow_label::{ResolvedArrowLabel, resolve_arrow_labels};
@@ -51,6 +54,15 @@ pub(crate) fn build_scene_with_labels(
     viewbox: ViewBox,
     arrow_labels: HashMap<usize, ResolvedArrowLabel>,
 ) -> Scene {
+    let cap_background = background
+        .or_else(|| {
+            data.app_state
+                .get("viewBackgroundColor")
+                .and_then(Value::as_str)
+                .and_then(|color| parse_color_result(color).ok())
+                .map(Rgba::from_tuple)
+        })
+        .unwrap_or(Rgba(255, 255, 255, 255));
     let generator = Generator::default();
     let elements: HashMap<&str, &ExcalidrawElement> = data
         .elements
@@ -97,14 +109,14 @@ pub(crate) fn build_scene_with_labels(
             apply_containing_frame(&mut built, el, &elements);
             drawables.extend(built);
             if let Some(text) = text
-                && let Some(mut label) = build_element(&generator, text, &data.files, background)
+                && let Some(mut label) = build_element(&generator, text, &data.files, cap_background)
             {
                 apply_containing_frame(std::slice::from_mut(&mut label), text, &elements);
                 drawables.push(label);
             }
         } else if !sticky_text_indices.contains(&index)
             && !bound_text.contains(&index)
-            && let Some(mut drawable) = build_element(&generator, el, &data.files, background)
+            && let Some(mut drawable) = build_element(&generator, el, &data.files, cap_background)
         {
             if let Some(label) = arrow_labels.get(&index) {
                 drawable.label_gap = Some(label.gap);
@@ -112,7 +124,7 @@ pub(crate) fn build_scene_with_labels(
                     &generator,
                     &data.elements[label.text_index],
                     &data.files,
-                    background,
+                    cap_background,
                 )
                 .map(|mut label_drawable| {
                     if let Primitive::Text(text) = &mut label_drawable.primitive {
@@ -179,11 +191,11 @@ fn build_element(
     generator: &Generator,
     el: &ExcalidrawElement,
     files: &HashMap<String, Value>,
-    background: Option<Rgba>,
+    cap_background: Rgba,
 ) -> Option<Drawable> {
     let primitive = match el.element_type.as_str() {
         "rectangle" | "ellipse" | "diamond" => Primitive::Paths(build_shape(generator, el)),
-        "line" | "arrow" => Primitive::Paths(build_line(generator, el, background)?),
+        "line" | "arrow" => Primitive::Paths(build_line(generator, el, cap_background)?),
         "freedraw" => Primitive::Paths(freedraw::build_freedraw(generator, el)?),
         "text" => Primitive::Text(build_text(el)?),
         "image" => Primitive::Image(build_image(el, files)?),
@@ -303,7 +315,7 @@ pub(super) fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<
 fn build_line(
     generator: &Generator,
     el: &ExcalidrawElement,
-    background: Option<Rgba>,
+    cap_background: Rgba,
 ) -> Option<Vec<PaintedPath>> {
     let points = el.points.as_ref()?;
     if points.is_empty() {
@@ -346,11 +358,27 @@ fn build_line(
 
     let mut out = lower_drawable(&shaft, stroke, fill, el.stroke_width, dash);
 
-    // Arrowheads (arrows only), drawn cleanly (no roughness).
+    // Caps share the element seed but apply their own roughness and dash rules.
     if el.element_type == "arrow" {
         if let Some(s) = stroke {
-            out.extend(arrowhead_paths(el, points, "start", s, background, curved));
-            out.extend(arrowhead_paths(el, points, "end", s, background, curved));
+            out.extend(arrowhead_paths(
+                generator,
+                el,
+                points,
+                "start",
+                s,
+                cap_background,
+                curved,
+            ));
+            out.extend(arrowhead_paths(
+                generator,
+                el,
+                points,
+                "end",
+                s,
+                cap_background,
+                curved,
+            ));
         }
     }
 
@@ -358,26 +386,34 @@ fn build_line(
 }
 
 fn arrowhead_paths(
+    generator: &Generator,
     el: &ExcalidrawElement,
     points: &[(f64, f64)],
     position: &str,
     stroke: Rgba,
-    background: Option<Rgba>,
+    cap_background: Rgba,
     curved: bool,
 ) -> Vec<PaintedPath> {
-    let kind = match position {
-        "start" => el
-            .start_arrowhead
-            .as_deref()
-            .or(el.start_arrow_type.as_deref()),
-        _ => el.end_arrowhead.as_deref().or(el.end_arrow_type.as_deref()),
-    };
-    let Some(kind) = kind else {
-        return vec![];
-    };
     if points.len() < 2 {
         return vec![];
     }
+    let (field, legacy, default) = if position == "start" {
+        (&el.start_arrowhead, el.start_arrow_type.as_deref(), None)
+    } else {
+        (
+            &el.end_arrowhead,
+            el.end_arrow_type.as_deref(),
+            Some("arrow"),
+        )
+    };
+    let kind = match field {
+        ArrowheadField::Named(kind) => Some(kind.as_str()),
+        ArrowheadField::Null => None,
+        ArrowheadField::Omitted => legacy.or(default),
+    };
+    let Some(kind) = kind.map(normalize_arrowhead) else {
+        return vec![];
+    };
 
     let direction = if curved {
         calculate_arrowhead_direction(points, el.x, el.y, position, 0.5)
@@ -385,19 +421,72 @@ fn arrowhead_paths(
     } else {
         straight_direction(points, el.x, el.y, position)
     };
-
-    let (tail_x, tail_y, tip_x, tip_y, seg_len) = direction;
-    let make = |kind| {
-        let vals =
-            calc_arrowhead_points(tail_x, tail_y, tip_x, tip_y, kind, el.stroke_width, seg_len);
-        arrowhead_shape(kind, &vals, stroke, el.stroke_width, background)
+    let (tail_x, tail_y, tip_x, tip_y, _) = direction;
+    let elbowed = el.elbowed.unwrap_or(false);
+    let make = |part: &str, offset: f64, diameter_scale: f64| {
+        let size = resolve_arrowhead_size(
+            points,
+            position,
+            part,
+            kind,
+            el.stroke_width,
+            curved,
+            elbowed,
+        );
+        let vals = calc_arrowhead_points_at_size(
+            tail_x,
+            tail_y,
+            tip_x,
+            tip_y,
+            part,
+            el.stroke_width,
+            size,
+            offset,
+        );
+        arrowhead_shape(
+            generator,
+            el,
+            part,
+            &vals,
+            stroke,
+            cap_background,
+            diameter_scale,
+        )
     };
-    if kind == "crowfoot_one_or_many" {
-        let mut paths = make("crowfoot_many");
-        paths.extend(make("crowfoot_one"));
-        paths
-    } else {
-        make(kind)
+    match kind {
+        "cardinality_one_or_many" => {
+            let mut paths = make("cardinality_many", 0.0, 1.0);
+            paths.extend(make(
+                "cardinality_one",
+                CARDINALITY_ONE_OR_MANY_BAR_OFFSET,
+                1.0,
+            ));
+            paths
+        }
+        "cardinality_exactly_one" => {
+            let mut paths = make("cardinality_one", CARDINALITY_INNER_BAR_OFFSET, 1.0);
+            paths.extend(make("cardinality_one", 0.0, 1.0));
+            paths
+        }
+        "cardinality_zero_or_one" => {
+            let mut paths = make(
+                "circle_outline",
+                CARDINALITY_ZERO_CIRCLE_OFFSET,
+                CARDINALITY_ZERO_CIRCLE_SCALE,
+            );
+            paths.extend(make("cardinality_one", CARDINALITY_INNER_BAR_OFFSET, 1.0));
+            paths
+        }
+        "cardinality_zero_or_many" => {
+            let mut paths = make("cardinality_many", 0.0, 1.0);
+            paths.extend(make(
+                "circle_outline",
+                CARDINALITY_ZERO_CIRCLE_OFFSET,
+                CARDINALITY_ZERO_CIRCLE_SCALE,
+            ));
+            paths
+        }
+        _ => make(kind, 0.0, 1.0),
     }
 }
 
@@ -420,85 +509,131 @@ fn straight_direction(
 }
 
 fn arrowhead_shape(
+    generator: &Generator,
+    el: &ExcalidrawElement,
     kind: &str,
     vals: &[f64],
     stroke: Rgba,
-    sw: f64,
-    background: Option<Rgba>,
+    cap_background: Rgba,
+    diameter_scale: f64,
 ) -> Vec<PaintedPath> {
-    // shortcut: transparent outlines don't mask the shaft; clip it if knockout is needed.
-    let fill = if kind.ends_with("_outline") {
-        background.filter(|color| color.3 != 0)
-    } else {
-        Some(stroke)
+    let mut options = rough_options(el, true, false, false);
+    let closed = matches!(
+        kind,
+        "circle"
+            | "circle_outline"
+            | "triangle"
+            | "triangle_outline"
+            | "diamond"
+            | "diamond_outline"
+    );
+    options.roughness = Some(el.roughness.max(0.0).min(
+        if matches!(kind, "circle" | "circle_outline") {
+            0.5
+        } else {
+            1.0
+        },
+    ) as f32);
+    if closed {
+        options.disable_multi_stroke = Some(true);
+        options.preserve_vertices = Some(true);
+    }
+    let dash = (!closed && el.stroke_style == "dotted")
+        .then(|| get_dotted_cap_dash_array(el.stroke_width));
+    let line = |x1: f64, y1: f64, x2: f64, y2: f64| {
+        lower_drawable(
+            &generator.line::<f64>(x1, y1, x2, y2, &Some(options.clone())),
+            Some(stroke),
+            None,
+            el.stroke_width,
+            dash.clone(),
+        )
     };
-    let outlined = |ops: Vec<PathOp>| PaintedPath {
-        ops,
-        fill,
-        stroke: Some(stroke),
-        stroke_width: sw,
-        dash: None,
-        fill_even_odd: false,
+    let lines_to_tip = || {
+        let mut paths = line(vals[2], vals[3], vals[0], vals[1]);
+        paths.extend(line(vals[4], vals[5], vals[0], vals[1]));
+        paths
+    };
+    let closed_fill = if kind.ends_with("_outline") {
+        cap_background
+    } else {
+        stroke
     };
 
     match kind {
-        "dot" | "circle" | "circle_outline" if vals.len() >= 3 => {
-            vec![outlined(circle_ops(vals[0], vals[1], vals[2] / 2.0))]
+        "circle" | "circle_outline" if vals.len() >= 3 => {
+            let diameter = vals[2] * diameter_scale;
+            if diameter <= 0.0 {
+                return vec![];
+            }
+            let drawable = generator.circle::<f64>(vals[0], vals[1], diameter, &Some(options));
+            lower_filled_cap(&drawable, stroke, closed_fill, el.stroke_width)
         }
-        "bar" if vals.len() >= 4 => vec![PaintedPath::stroke_only(
-            vec![
-                PathOp::Move(vals[0], vals[1]),
-                PathOp::Line(vals[2], vals[3]),
-            ],
-            stroke,
-            sw,
-        )],
-        "crowfoot_one" if vals.len() >= 6 => vec![PaintedPath::stroke_only(
-            vec![
-                PathOp::Move(vals[2], vals[3]),
-                PathOp::Line(vals[4], vals[5]),
-            ],
-            stroke,
-            sw,
-        )],
-        "arrow" | "crowfoot_many" if vals.len() >= 6 => vec![PaintedPath::stroke_only(
-            vec![
-                PathOp::Move(vals[2], vals[3]),
-                PathOp::Line(vals[0], vals[1]),
-                PathOp::Move(vals[4], vals[5]),
-                PathOp::Line(vals[0], vals[1]),
-            ],
-            stroke,
-            sw,
-        )],
-        "triangle" | "triangle_outline" if vals.len() >= 6 => vec![outlined(vec![
-            PathOp::Move(vals[0], vals[1]),
-            PathOp::Line(vals[2], vals[3]),
-            PathOp::Line(vals[4], vals[5]),
-            PathOp::Close,
-        ])],
-        "diamond" | "diamond_outline" if vals.len() >= 8 => vec![outlined(vec![
-            PathOp::Move(vals[0], vals[1]),
-            PathOp::Line(vals[2], vals[3]),
-            PathOp::Line(vals[4], vals[5]),
-            PathOp::Line(vals[6], vals[7]),
-            PathOp::Close,
-        ])],
+        "bar" | "cardinality_one" if vals.len() >= 6 => line(vals[2], vals[3], vals[4], vals[5]),
+        "arrow" | "cardinality_many" if vals.len() >= 6 => lines_to_tip(),
+        "triangle" | "triangle_outline" if vals.len() >= 6 => {
+            let points = vec![
+                Point2D::new(vals[0], vals[1]),
+                Point2D::new(vals[2], vals[3]),
+                Point2D::new(vals[4], vals[5]),
+            ];
+            let drawable = generator.polygon::<f64>(&points, &Some(options));
+            lower_filled_cap(&drawable, stroke, closed_fill, el.stroke_width)
+        }
+        "diamond" | "diamond_outline" if vals.len() >= 8 => {
+            let points = vec![
+                Point2D::new(vals[0], vals[1]),
+                Point2D::new(vals[2], vals[3]),
+                Point2D::new(vals[4], vals[5]),
+                Point2D::new(vals[6], vals[7]),
+            ];
+            let drawable = generator.polygon::<f64>(&points, &Some(options));
+            lower_filled_cap(&drawable, stroke, closed_fill, el.stroke_width)
+        }
         _ => vec![],
     }
 }
 
-/// Cubic-bezier approximation of a circle (kappa constant).
-fn circle_ops(cx: f64, cy: f64, r: f64) -> Vec<PathOp> {
-    let k = 0.552_284_749_830_793_6 * r;
-    vec![
-        PathOp::Move(cx + r, cy),
-        PathOp::Cubic(cx + r, cy + k, cx + k, cy + r, cx, cy + r),
-        PathOp::Cubic(cx - k, cy + r, cx - r, cy + k, cx - r, cy),
-        PathOp::Cubic(cx - r, cy - k, cx - k, cy - r, cx, cy - r),
-        PathOp::Cubic(cx + k, cy - r, cx + r, cy - k, cx + r, cy),
-        PathOp::Close,
-    ]
+/// Fill along the rough outline itself so small hollow caps mask their shafts
+/// without a separately jittered fill polygon.
+fn lower_filled_cap(
+    drawable: &RoughDrawable<f64>,
+    stroke: Rgba,
+    fill: Rgba,
+    stroke_width: f64,
+) -> Vec<PaintedPath> {
+    let mut ops = Vec::new();
+    for set in drawable
+        .sets
+        .iter()
+        .filter(|set| set.op_set_type == OpSetType::Path)
+    {
+        for op in convert_ops(set) {
+            ops.push(match op {
+                PathOp::Move(x, y) if !ops.is_empty() => PathOp::Line(x, y),
+                _ => op,
+            });
+        }
+    }
+    let mut paths = Vec::new();
+    if !ops.is_empty() {
+        paths.push(PaintedPath {
+            ops,
+            fill: Some(fill),
+            stroke: None,
+            stroke_width: 0.0,
+            dash: None,
+            fill_even_odd: false,
+        });
+    }
+    paths.extend(lower_drawable(
+        drawable,
+        Some(stroke),
+        None,
+        stroke_width,
+        None,
+    ));
+    paths
 }
 
 // ---------------------------------------------------------------------------

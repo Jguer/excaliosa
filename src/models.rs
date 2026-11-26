@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 
 // Style/geometry defaults matching Excalidraw so partial or older documents
@@ -36,6 +36,37 @@ where
     D: serde::Deserializer<'de>,
 {
     Ok(Option::<serde_json::Value>::deserialize(deserializer)?.and_then(|value| value.as_f64()))
+}
+
+/// Modern arrowhead fields distinguish an omitted value (legacy/default
+/// fallback) from an explicit null (no cap).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ArrowheadField {
+    #[default]
+    Omitted,
+    Null,
+    Named(String),
+}
+
+impl Serialize for ArrowheadField {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Named(name) => serializer.serialize_str(name),
+            Self::Omitted | Self::Null => serializer.serialize_none(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ArrowheadField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Option::<String>::deserialize(deserializer)?.map_or(Self::Null, Self::Named))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,8 +113,8 @@ pub struct ExcalidrawElement {
     pub end_binding: Option<Binding>,
     pub start_arrow_type: Option<String>,
     pub end_arrow_type: Option<String>,
-    pub start_arrowhead: Option<String>,
-    pub end_arrowhead: Option<String>,
+    pub start_arrowhead: ArrowheadField,
+    pub end_arrowhead: ArrowheadField,
     pub points: Option<Vec<(f64, f64)>>,
     pub last_committed_point: Option<Vec<f64>>,
     pub elbowed: Option<bool>,
@@ -145,8 +176,8 @@ impl Default for ExcalidrawElement {
             end_binding: None,
             start_arrow_type: None,
             end_arrow_type: None,
-            start_arrowhead: None,
-            end_arrowhead: None,
+            start_arrowhead: ArrowheadField::Omitted,
+            end_arrowhead: ArrowheadField::Omitted,
             points: None,
             last_committed_point: None,
             elbowed: None,

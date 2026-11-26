@@ -16,7 +16,7 @@ use tiny_skia::{
 };
 
 use crate::font_utils::normalize_newlines;
-use crate::fonts::bundled_font;
+use crate::fonts::{BUNDLED_FONT_FALLBACK_ORDER, bundled_font};
 use crate::models::ExcalidrawData;
 use crate::scene::arrow_label::resolve_arrow_labels;
 use crate::scene::build::{build_scene_with_labels, measure_linear_elements};
@@ -320,18 +320,45 @@ fn draw_text(
     opacity: f64,
     mask: Option<&Mask>,
 ) {
-    let Ok(font) = ReadFontsRef::new(bundled_font(text.font_family).bytes) else {
+    let Ok(primary) = ReadFontsRef::new(bundled_font(text.font_family).bytes) else {
         return;
     };
-    let outlines = font.outline_glyphs();
-    let charmap = font.charmap();
-    let glyph_for = |ch: char| {
-        charmap
-            .map(ch)
-            .or_else(|| (!ch.is_whitespace() && !ch.is_control()).then_some(GlyphId::NOTDEF))
-    };
     let size = Size::new(text.font_size as f32);
-    let metrics = font.glyph_metrics(size, LocationRef::default());
+    let mut fonts = vec![primary];
+    fonts.extend(
+        BUNDLED_FONT_FALLBACK_ORDER
+            .into_iter()
+            .filter(|family| *family != text.font_family)
+            .filter_map(|family| ReadFontsRef::new(bundled_font(family).bytes).ok()),
+    );
+    let charmaps: Vec<_> = fonts.iter().map(|font| font.charmap()).collect();
+    let metrics: Vec<_> = fonts
+        .iter()
+        .map(|font| font.glyph_metrics(size, LocationRef::default()))
+        .collect();
+    let outlines: Vec<_> = fonts.iter().map(|font| font.outline_glyphs()).collect();
+    let glyph_for = |ch: char| {
+        charmaps[0]
+            .map(ch)
+            .filter(|glyph| *glyph != GlyphId::NOTDEF)
+            .map(|glyph| (0, glyph))
+            .or_else(|| {
+                if ch.is_whitespace() || ch.is_control() {
+                    return None;
+                }
+                charmaps
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .find_map(|(index, charmap)| {
+                        charmap
+                            .map(ch)
+                            .filter(|glyph| *glyph != GlyphId::NOTDEF)
+                            .map(|glyph| (index, glyph))
+                    })
+            })
+            .or_else(|| (!ch.is_whitespace() && !ch.is_control()).then_some((0, GlyphId::NOTDEF)))
+    };
 
     let (r, g, b, a) = apply_opacity(text.color, opacity);
     if a == 0 {
@@ -348,7 +375,7 @@ fn draw_text(
         let line_width: f32 = line
             .chars()
             .filter_map(glyph_for)
-            .filter_map(|g| metrics.advance_width(g))
+            .filter_map(|(font, glyph)| metrics[font].advance_width(glyph))
             .sum();
 
         let start_x = match text.align {
@@ -359,15 +386,14 @@ fn draw_text(
 
         let mut cursor_x = start_x;
         for ch in line.chars() {
-            if let Some(glyph_id) = glyph_for(ch) {
-                if let Some(outline) = outlines.get(glyph_id) {
-                    if let Some(path) =
+            if let Some((font, glyph_id)) = glyph_for(ch) {
+                if let Some(outline) = outlines[font].get(glyph_id)
+                    && let Some(path) =
                         glyph_path(&outline, text.font_size as f32, cursor_x, baseline_y)
-                    {
-                        pixmap.fill_path(&path, &paint, FillRule::Winding, transform, mask);
-                    }
+                {
+                    pixmap.fill_path(&path, &paint, FillRule::Winding, transform, mask);
                 }
-                if let Some(advance) = metrics.advance_width(glyph_id) {
+                if let Some(advance) = metrics[font].advance_width(glyph_id) {
                     cursor_x += advance;
                 }
             }

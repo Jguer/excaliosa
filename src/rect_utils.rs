@@ -33,6 +33,60 @@ pub fn get_corner_radius(x: f64, element: &ExcalidrawElement) -> f64 {
     0.0
 }
 
+/// Generate the trimmed diamond edges and cubic corners used by Excalidraw.
+pub fn generate_rounded_diamond_path(element: &ExcalidrawElement) -> String {
+    let x = element.x;
+    let y = element.y;
+    let top_x = x + element.width / 2.0;
+    let top_y = y;
+    let right_x = x + element.width;
+    let right_y = y + element.height / 2.0;
+    let bottom_x = top_x;
+    let bottom_y = y + element.height;
+    let left_x = x;
+    let left_y = right_y;
+    let vertical_radius = get_corner_radius((top_x - left_x).abs(), element);
+    let horizontal_radius = get_corner_radius((right_y - top_y).abs(), element);
+
+    format!(
+        "M {} {} L {} {} C {} {}, {} {}, {} {} L {} {} C {} {}, {} {}, {} {} L {} {} C {} {}, {} {}, {} {} L {} {} C {} {}, {} {}, {} {}",
+        top_x + vertical_radius,
+        top_y + horizontal_radius,
+        right_x - vertical_radius,
+        right_y - horizontal_radius,
+        right_x,
+        right_y,
+        right_x,
+        right_y,
+        right_x - vertical_radius,
+        right_y + horizontal_radius,
+        bottom_x + vertical_radius,
+        bottom_y - horizontal_radius,
+        bottom_x,
+        bottom_y,
+        bottom_x,
+        bottom_y,
+        bottom_x - vertical_radius,
+        bottom_y - horizontal_radius,
+        left_x + vertical_radius,
+        left_y + horizontal_radius,
+        left_x,
+        left_y,
+        left_x,
+        left_y,
+        left_x + vertical_radius,
+        left_y - horizontal_radius,
+        top_x - vertical_radius,
+        top_y + horizontal_radius,
+        top_x,
+        top_y,
+        top_x,
+        top_y,
+        top_x + vertical_radius,
+        top_y + horizontal_radius,
+    )
+}
+
 /// Generate SVG path string for a rounded rectangle using quadratic curve commands
 /// This uses Q commands (quadratic curves) which work well with Skia and provide smooth corners
 pub fn generate_rounded_rect_path(x: f64, y: f64, width: f64, height: f64, radius: f64) -> String {

@@ -17,7 +17,9 @@ use crate::color_utils::{fill_color, has_stroke, parse_color};
 use crate::font_utils::{get_font_family, text_metrics};
 use crate::math_utils::calculate_center;
 use crate::models::{ExcalidrawData, ExcalidrawElement};
-use crate::rect_utils::{generate_rounded_rect_path, get_corner_radius};
+use crate::rect_utils::{
+    generate_rounded_diamond_path, generate_rounded_rect_path, get_corner_radius,
+};
 use crate::stroke_utils::get_stroke_dash_array;
 use crate::utils::{calculate_viewbox, contributes_bounds};
 
@@ -96,7 +98,8 @@ fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath
     let stroke = should_stroke.then(|| Rgba::from_tuple(parse_color(&el.stroke_color)));
     let fill = fill_color(el).map(Rgba::from_tuple);
     let dash = get_stroke_dash_array(&el.stroke_style, el.stroke_width);
-    let opts = rough_options(el, should_stroke, fill.is_some());
+    let options =
+        |continuous_path| rough_options(el, should_stroke, fill.is_some(), continuous_path);
 
     let drawable = match el.element_type.as_str() {
         "rectangle" => {
@@ -107,16 +110,20 @@ fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath
             };
             if radius > 0.0 {
                 let d = generate_rounded_rect_path(el.x, el.y, el.width, el.height, radius);
-                generator.path::<f64>(d, &Some(opts))
+                generator.path::<f64>(d, &Some(options(true)))
             } else {
-                generator.rectangle::<f64>(el.x, el.y, el.width, el.height, &Some(opts))
+                generator.rectangle::<f64>(el.x, el.y, el.width, el.height, &Some(options(false)))
             }
         }
         "ellipse" => {
             let (cx, cy) = calculate_center(el.x, el.y, el.width, el.height);
-            generator.ellipse::<f64>(cx, cy, el.width, el.height, &Some(opts))
+            generator.ellipse::<f64>(cx, cy, el.width, el.height, &Some(options(false)))
         }
         // diamond
+        _ if el.roundness.is_some() => {
+            let d = generate_rounded_diamond_path(el);
+            generator.path::<f64>(d, &Some(options(true)))
+        }
         _ => {
             let points = vec![
                 Point2D::new(el.x + el.width / 2.0, el.y),
@@ -124,7 +131,7 @@ fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath
                 Point2D::new(el.x + el.width / 2.0, el.y + el.height),
                 Point2D::new(el.x, el.y + el.height / 2.0),
             ];
-            generator.polygon::<f64>(&points, &Some(opts))
+            generator.polygon::<f64>(&points, &Some(options(false)))
         }
     };
 
@@ -162,7 +169,7 @@ fn build_line(
     } else {
         None
     };
-    let opts = rough_options(el, should_stroke, fill.is_some());
+    let opts = rough_options(el, should_stroke, fill.is_some(), elbowed);
     let shaft = if elbowed && abs.len() >= 3 {
         match build_elbow_arrow_path(&abs, 16.0) {
             Some(d) => generator.path::<f64>(d, &Some(opts)),
@@ -397,10 +404,19 @@ fn is_allowed_raster_data_url(data_url: &str) -> bool {
 /// Build roughr options for an element. Colors only signal *presence* of a
 /// stroke/fill (the real colors are applied when lowering the op-sets), so
 /// geometry generation matches regardless of the element's actual palette.
-fn rough_options(el: &ExcalidrawElement, should_stroke: bool, should_fill: bool) -> Options {
+fn rough_options(
+    el: &ExcalidrawElement,
+    should_stroke: bool,
+    should_fill: bool,
+    continuous_path: bool,
+) -> Options {
     let present = Srgba::new(0.0, 0.0, 0.0, 1.0);
     let mut o = Options::default();
-    o.roughness = Some(el.roughness.max(0.0) as f32);
+    o.roughness = Some(adjusted_roughness(el) as f32);
+    o.preserve_vertices = Some(continuous_path || el.roughness < 1.0);
+    if el.element_type == "ellipse" {
+        o.curve_fitting = Some(1.0);
+    }
     o.seed = Some(el.seed as u64);
     let non_solid = el.stroke_style != "solid";
     let width = el.stroke_width as f32;
@@ -417,6 +433,26 @@ fn rough_options(el: &ExcalidrawElement, should_stroke: bool, should_fill: bool)
         _ => FillStyle::Hachure,
     });
     o
+}
+
+fn adjusted_roughness(el: &ExcalidrawElement) -> f64 {
+    let roughness = el.roughness.max(0.0);
+    let max_size = el.width.max(el.height);
+    let min_size = el.width.min(el.height);
+    let roundable = matches!(
+        el.element_type.as_str(),
+        "rectangle" | "iframe" | "embeddable" | "line" | "diamond" | "stickynote" | "image"
+    );
+    let linear = matches!(el.element_type.as_str(), "line" | "arrow");
+
+    if (min_size >= 20.0 && max_size >= 50.0)
+        || (min_size >= 15.0 && el.roundness.is_some() && roundable)
+        || (linear && max_size >= 50.0)
+    {
+        roughness
+    } else {
+        (roughness / if max_size < 10.0 { 3.0 } else { 2.0 }).min(2.5)
+    }
 }
 
 /// Convert a roughr [`Drawable`] into painted paths, mapping each op-set to the
@@ -492,4 +528,75 @@ fn convert_ops(set: &OpSet<f64>) -> Vec<PathOp> {
 
 fn to_points(points: &[(f64, f64)]) -> Vec<Point2D<f64>> {
     points.iter().map(|(x, y)| Point2D::new(*x, *y)).collect()
+}
+
+#[cfg(test)]
+mod rough_option_tests {
+    use super::*;
+    use crate::models::RoundnessType;
+
+    fn element(kind: &str, width: f64, height: f64, rounded: bool) -> ExcalidrawElement {
+        ExcalidrawElement {
+            element_type: kind.into(),
+            width,
+            height,
+            roughness: 4.0,
+            roundness: rounded.then_some(RoundnessType {
+                roundness_type: 2,
+                value: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn roughness_reduction_and_exemption_boundaries() {
+        for (kind, width, height, rounded, expected) in [
+            ("rectangle", 9.0, 9.0, false, 4.0 / 3.0),
+            ("rectangle", 10.0, 9.0, false, 2.0),
+            ("rectangle", 20.0, 50.0, false, 4.0),
+            ("rectangle", 19.0, 50.0, false, 2.0),
+            ("rectangle", 15.0, 15.0, true, 4.0),
+            ("ellipse", 15.0, 15.0, true, 2.0),
+            ("line", 50.0, 0.0, false, 4.0),
+            ("arrow", 15.0, 15.0, true, 2.0),
+            ("rectangle", 50.0, 0.0, false, 2.0),
+        ] {
+            let el = element(kind, width, height, rounded);
+            assert_eq!(adjusted_roughness(&el), expected, "{kind} {width}x{height}");
+        }
+
+        let mut capped = element("rectangle", 10.0, 10.0, false);
+        capped.roughness = 9.0;
+        assert_eq!(adjusted_roughness(&capped), 2.5);
+    }
+
+    #[test]
+    fn vertices_and_ellipse_curve_fitting_follow_upstream_options() {
+        let el = element("rectangle", 100.0, 100.0, false);
+        assert_eq!(
+            rough_options(&el, true, false, false).preserve_vertices,
+            Some(false)
+        );
+        assert_eq!(
+            rough_options(&el, true, false, true).preserve_vertices,
+            Some(true)
+        );
+
+        let mut low_roughness = el.clone();
+        low_roughness.roughness = 0.5;
+        assert_eq!(
+            rough_options(&low_roughness, true, false, false).preserve_vertices,
+            Some(true)
+        );
+
+        let ellipse = element("ellipse", 100.0, 100.0, false);
+        let ellipse_options = rough_options(&ellipse, true, false, false);
+        assert_eq!(ellipse_options.curve_fitting, Some(1.0));
+        assert_eq!(ellipse_options.preserve_vertices, Some(false));
+        assert_eq!(
+            rough_options(&el, true, false, false).curve_fitting,
+            Some(0.95)
+        );
+    }
 }

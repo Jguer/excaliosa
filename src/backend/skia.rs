@@ -11,7 +11,7 @@ use skrifa::{
     raw::FontRef as ReadFontsRef,
 };
 use tiny_skia::{
-    ColorU8, FillRule, FilterQuality, LineCap, LineJoin, Paint, Path as SkPath, PathBuilder,
+    ColorU8, FillRule, FilterQuality, LineCap, LineJoin, Mask, Paint, Path as SkPath, PathBuilder,
     Pixmap, PixmapPaint, Rect, Stroke, StrokeDash, Transform,
 };
 
@@ -364,18 +364,49 @@ fn draw_image(
     let iw = img.width() as f32;
     let ih = img.height() as f32;
 
-    // Scale the source image into the element box, optionally flipping.
-    let sx = image.width as f32 / iw;
-    let sy = image.height as f32 / ih;
-    let (sx, tx) = if image.flip_x {
-        (-sx, image.width as f32)
+    let (sx, sy, tx, ty) = if let Some(crop) = image.crop {
+        let crop_x = iw * crop.x as f32;
+        let crop_y = ih * crop.y as f32;
+        let crop_width = iw * crop.width as f32;
+        let crop_height = ih * crop.height as f32;
+        ensure!(
+            crop_width > 0.0 && crop_height > 0.0,
+            "Invalid embedded PNG crop dimensions"
+        );
+
+        // Map the selected source window into the element box, then flip within it.
+        let sx = image.width as f32 / crop_width;
+        let sy = image.height as f32 / crop_height;
+        let (sx, tx) = if image.flip_x {
+            (-sx, sx * (crop_x + crop_width))
+        } else {
+            (sx, -sx * crop_x)
+        };
+        let (sy, ty) = if image.flip_y {
+            (-sy, sy * (crop_y + crop_height))
+        } else {
+            (sy, -sy * crop_y)
+        };
+        ensure!(
+            [sx, sy, tx, ty].into_iter().all(f32::is_finite),
+            "Invalid embedded PNG crop scale"
+        );
+        (sx, sy, tx, ty)
     } else {
-        (sx, 0.0)
-    };
-    let (sy, ty) = if image.flip_y {
-        (-sy, image.height as f32)
-    } else {
-        (sy, 0.0)
+        // Preserve the original uncropped placement fast path.
+        let sx = image.width as f32 / iw;
+        let sy = image.height as f32 / ih;
+        let (sx, tx) = if image.flip_x {
+            (-sx, image.width as f32)
+        } else {
+            (sx, 0.0)
+        };
+        let (sy, ty) = if image.flip_y {
+            (-sy, image.height as f32)
+        } else {
+            (sy, 0.0)
+        };
+        (sx, sy, tx, ty)
     };
 
     let placement = Transform::from_translate(image.x as f32, image.y as f32)
@@ -389,8 +420,48 @@ fn draw_image(
     };
     paint.opacity = opacity.clamp(0.0, 1.0) as f32;
 
-    pixmap.draw_pixmap(0, 0, img.as_ref(), &paint, img_tf, None);
+    let clip = image_clip(pixmap, image, transform)?;
+    pixmap.draw_pixmap(0, 0, img.as_ref(), &paint, img_tf, clip.as_ref());
     Ok(())
+}
+
+fn image_clip(
+    pixmap: &Pixmap,
+    image: &ImagePrimitive,
+    transform: Transform,
+) -> Result<Option<Mask>> {
+    if image.crop.is_none() && image.corner_radius == 0.0 {
+        return Ok(None);
+    }
+    let rect = Rect::from_xywh(
+        image.x as f32,
+        image.y as f32,
+        image.width as f32,
+        image.height as f32,
+    )
+    .context("Invalid embedded PNG clip geometry")?;
+    let path = if image.corner_radius > 0.0 {
+        let r = image.corner_radius as f32;
+        let (left, top, right, bottom) = (rect.left(), rect.top(), rect.right(), rect.bottom());
+        let mut pb = PathBuilder::new();
+        pb.move_to(left + r, top);
+        pb.line_to(right - r, top);
+        pb.quad_to(right, top, right, top + r);
+        pb.line_to(right, bottom - r);
+        pb.quad_to(right, bottom, right - r, bottom);
+        pb.line_to(left + r, bottom);
+        pb.quad_to(left, bottom, left, bottom - r);
+        pb.line_to(left, top + r);
+        pb.quad_to(left, top, left + r, top);
+        pb.close();
+        pb.finish().context("Invalid embedded PNG rounded clip")?
+    } else {
+        PathBuilder::from_rect(rect)
+    };
+    let mut mask = Mask::new(pixmap.width(), pixmap.height())
+        .context("Failed to allocate embedded PNG clip")?;
+    mask.fill_path(&path, FillRule::Winding, true, transform);
+    Ok(Some(mask))
 }
 
 // ---------------------------------------------------------------------------

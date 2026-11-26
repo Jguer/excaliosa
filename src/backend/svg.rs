@@ -38,8 +38,8 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>)
         }
     }
 
-    for drawable in &scene.drawables {
-        let rendered = render_drawable(drawable);
+    for (index, drawable) in scene.drawables.iter().enumerate() {
+        let rendered = render_drawable(drawable, index);
         if !rendered.is_empty() {
             body.push_str(&rendered);
             body.push('\n');
@@ -76,11 +76,11 @@ fn font_css(drawables: &[Drawable]) -> String {
     css
 }
 
-fn render_drawable(drawable: &Drawable) -> String {
+fn render_drawable(drawable: &Drawable, index: usize) -> String {
     let inner = match &drawable.primitive {
         Primitive::Paths(paths) => paths.iter().map(path_svg).collect::<Vec<_>>().join("\n"),
         Primitive::Text(text) => text_svg(text),
-        Primitive::Image(image) => image_svg(image),
+        Primitive::Image(image) => image_svg(image, index),
     };
     if inner.is_empty() {
         return String::new();
@@ -267,8 +267,21 @@ fn text_svg(t: &TextPrimitive) -> String {
     )
 }
 
-fn image_svg(im: &ImagePrimitive) -> String {
-    // Represent axis flips as a local transform about the image center.
+fn image_svg(im: &ImagePrimitive, index: usize) -> String {
+    let (x, y, width, height) = if let Some(crop) = im.crop {
+        let uncropped_width = im.width / crop.width;
+        let uncropped_height = im.height / crop.height;
+        (
+            im.x - crop.x * uncropped_width,
+            im.y - crop.y * uncropped_height,
+            uncropped_width,
+            uncropped_height,
+        )
+    } else {
+        (im.x, im.y, im.width, im.height)
+    };
+
+    // Flip the cropped pixels around the element box, leaving its clip fixed.
     let mut transform = String::new();
     if im.flip_x || im.flip_y {
         let sx = if im.flip_x { -1.0 } else { 1.0 };
@@ -277,14 +290,28 @@ fn image_svg(im: &ImagePrimitive) -> String {
         let ty = if im.flip_y { 2.0 * im.y + im.height } else { 0.0 };
         transform = format!(" transform=\"translate({tx} {ty}) scale({sx} {sy})\"");
     }
-    format!(
+    let image = format!(
         "<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" href=\"{}\" preserveAspectRatio=\"none\"{}/>",
-        im.x,
-        im.y,
-        im.width,
-        im.height,
+        x,
+        y,
+        width,
+        height,
         escape_xml(&im.data_url),
         transform
+    );
+    if im.crop.is_none() && im.corner_radius == 0.0 {
+        return image;
+    }
+
+    let id = format!("excaliosa-image-clip-{index}");
+    let radius = if im.corner_radius > 0.0 {
+        format!(" rx=\"{}\" ry=\"{}\"", im.corner_radius, im.corner_radius)
+    } else {
+        String::new()
+    };
+    format!(
+        "<defs><clipPath id=\"{id}\" clipPathUnits=\"userSpaceOnUse\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"{radius}/></clipPath></defs>\n<g clip-path=\"url(#{id})\">{image}</g>",
+        im.x, im.y, im.width, im.height
     )
 }
 

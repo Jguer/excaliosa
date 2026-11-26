@@ -209,6 +209,15 @@ fn missing_backlinks_resolve_only_when_unambiguous() {
     assert_eq!(scene.drawables.len(), 2);
     assert_eq!(text_primitive(&scene, "LABEL").x, 30.0);
 
+    let forward = arrow("forward", 0.0, 50.0, vec![(0.0, 0.0), (100.0, 0.0)]);
+    let mut other = arrow("other", 0.0, 75.0, vec![(0.0, 0.0), (100.0, 0.0)]);
+    let claimed = label("claimed", Some("forward"), 500.0, 500.0);
+    bind(&mut other, &claimed);
+    let scene = scene_for(vec![forward, other, claimed]);
+    assert_eq!(scene.drawables[0].label_gap, None);
+    assert_eq!(scene.drawables[1].label_gap, None);
+    assert_eq!(text_primitive(&scene, "LABEL").x, 500.0);
+
     let mut reverse = arrow("reverse", 0.0, 100.0, vec![(0.0, 0.0), (100.0, 0.0)]);
     let text = label("reverse-label", None, 500.0, 500.0);
     bind(&mut reverse, &text);
@@ -253,18 +262,20 @@ fn conflicting_dangling_deleted_and_empty_bindings_stay_safe() {
     assert_eq!(scene.drawables.len(), 1);
     assert_eq!(scene.drawables[0].label_gap, None);
 
-    let mut empty_label_arrow = arrow(
-        "empty-label-arrow",
-        0.0,
-        200.0,
-        vec![(0.0, 0.0), (100.0, 0.0)],
-    );
-    let mut empty_label = label("empty-label", Some("empty-label-arrow"), 0.0, 0.0);
-    empty_label.text = Some(String::new());
-    bind(&mut empty_label_arrow, &empty_label);
-    let scene = scene_for(vec![empty_label_arrow, empty_label]);
-    assert_eq!(scene.drawables.len(), 1);
-    assert_eq!(scene.drawables[0].label_gap, None);
+    for blank in ["", "   "] {
+        let mut empty_label_arrow = arrow(
+            "empty-label-arrow",
+            0.0,
+            200.0,
+            vec![(0.0, 0.0), (100.0, 0.0)],
+        );
+        let mut empty_label = label("empty-label", Some("empty-label-arrow"), 0.0, 0.0);
+        empty_label.text = Some(blank.into());
+        bind(&mut empty_label_arrow, &empty_label);
+        let scene = scene_for(vec![empty_label_arrow, empty_label]);
+        assert_eq!(scene.drawables[0].label_gap, None);
+        assert_eq!(scene.drawables.len(), if blank.is_empty() { 1 } else { 2 });
+    }
 
     let mut unrenderable = arrow("unrenderable", 0.0, 300.0, vec![]);
     let orphaned = label("orphaned", Some("unrenderable"), 800.0, 800.0);

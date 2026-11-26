@@ -56,7 +56,10 @@ pub(crate) fn resolve_arrow_labels(
     for (text_index, text) in elements.iter().enumerate() {
         if text.is_deleted
             || text.element_type != "text"
-            || !text.text.as_deref().is_some_and(|value| !value.is_empty())
+            || !text
+                .text
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
         {
             continue;
         }
@@ -76,13 +79,20 @@ pub(crate) fn resolve_arrow_labels(
             .filter(|bound| bound.element_type == "text")
             .map(|bound| bound.id.as_str())
             .collect();
+        let claims = arrows_by_text
+            .get(text.id.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let binding_matches = match backlinks.as_slice() {
-            [id] if *id == text.id => text_id_counts.get(text.id.as_str()) == Some(&1),
+            [id] if *id == text.id => {
+                text_id_counts.get(text.id.as_str()) == Some(&1) && claims == [arrow_index]
+            }
             [] => {
                 text.container_id.as_deref() == Some(arrow.id.as_str())
                     && texts_by_container
                         .get(arrow.id.as_str())
                         .is_some_and(|texts| texts.len() == 1)
+                    && claims.is_empty()
             }
             _ => false,
         };
@@ -124,14 +134,15 @@ fn label_center(arrow: &ExcalidrawElement, label_position: Option<f64>) -> Optio
         .collect();
     let curved =
         !arrow.elbowed.unwrap_or(false) && arrow.roundness.is_some() && absolute.len() >= 3;
+    let curves = curved.then(|| catmull_rom_cubics(&absolute, 0.5));
 
     let center = if let Some(position) = label_position.filter(|value| value.is_finite()) {
-        point_at_path_fraction(&absolute, curved, position.clamp(0.0, 1.0))
+        point_at_path_fraction(&absolute, curves.as_deref(), position.clamp(0.0, 1.0))
     } else if absolute.len() % 2 == 1 {
         absolute[absolute.len() / 2]
     } else {
         let segment = absolute.len() / 2 - 1;
-        point_at_segment_fraction(&absolute, curved, segment, 0.5)
+        point_at_segment_fraction(&absolute, curves.as_deref(), segment, 0.5)
     };
 
     // Match the renderer's stored-box pivot; deriving precise linear geometry
@@ -142,9 +153,13 @@ fn label_center(arrow: &ExcalidrawElement, label_position: Option<f64>) -> Optio
     Some((pivot.0 + dx * cos - dy * sin, pivot.1 + dx * sin + dy * cos))
 }
 
-fn point_at_path_fraction(points: &[(f64, f64)], curved: bool, fraction: f64) -> (f64, f64) {
+fn point_at_path_fraction(
+    points: &[(f64, f64)],
+    curves: Option<&[CubicBezierSegment<f64>]>,
+    fraction: f64,
+) -> (f64, f64) {
     let lengths: Vec<f64> = (0..points.len() - 1)
-        .map(|index| sampled_segment(points, curved, index, 1.0).1)
+        .map(|index| sampled_segment(points, curves, index, 1.0).1)
         .collect();
     let total: f64 = lengths.iter().sum();
     if total == 0.0 {
@@ -159,7 +174,7 @@ fn point_at_path_fraction(points: &[(f64, f64)], curved: bool, fraction: f64) ->
             } else {
                 ((target - traversed) / length).clamp(0.0, 1.0)
             };
-            return point_at_segment_fraction(points, curved, index, fraction);
+            return point_at_segment_fraction(points, curves, index, fraction);
         }
         traversed += length;
     }
@@ -168,21 +183,21 @@ fn point_at_path_fraction(points: &[(f64, f64)], curved: bool, fraction: f64) ->
 
 fn point_at_segment_fraction(
     points: &[(f64, f64)],
-    curved: bool,
+    curves: Option<&[CubicBezierSegment<f64>]>,
     segment: usize,
     fraction: f64,
 ) -> (f64, f64) {
-    sampled_segment(points, curved, segment, fraction).0
+    sampled_segment(points, curves, segment, fraction).0
 }
 
 /// Sample cubics with a fixed budget, then interpolate by sampled arc length.
 fn sampled_segment(
     points: &[(f64, f64)],
-    curved: bool,
+    curves: Option<&[CubicBezierSegment<f64>]>,
     segment: usize,
     fraction: f64,
 ) -> ((f64, f64), f64) {
-    if !curved {
+    let Some(curves) = curves else {
         let start = points[segment];
         let end = points[segment + 1];
         let length = (end.0 - start.0).hypot(end.1 - start.1);
@@ -193,9 +208,9 @@ fn sampled_segment(
             ),
             length,
         );
-    }
+    };
 
-    let curve = catmull_rom_cubics(points, 0.5)[segment];
+    let curve = curves[segment];
     let samples: Vec<(f64, f64)> = (0..=CURVE_SAMPLES)
         .map(|index| cubic_point(curve, index as f64 / CURVE_SAMPLES as f64))
         .collect();

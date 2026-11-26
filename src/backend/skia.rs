@@ -18,11 +18,13 @@ use tiny_skia::{
 use crate::font_utils::normalize_newlines;
 use crate::fonts::bundled_font;
 use crate::models::ExcalidrawData;
+use crate::scene::arrow_label::resolve_arrow_labels;
+use crate::scene::build::build_scene_with_labels;
 use crate::scene::{
     FrameClip, ImagePrimitive, LabelGap, PaintedPath, PathOp, Primitive, Rgba, TextAlign,
-    TextPrimitive, build_scene,
+    TextPrimitive,
 };
-use crate::utils::save_png_with_quality;
+use crate::utils::{calculate_viewbox_with_labels, save_png_with_quality};
 
 const SOURCE_DPI: f64 = 96.0;
 const MAX_RASTER_AXIS: f64 = 8192.0;
@@ -45,8 +47,8 @@ pub fn render_to_png(
 ) -> Result<()> {
     ensure!(dpi != Some(0), "PNG DPI must be positive");
     let scale = dpi.map(|d| f64::from(d) / SOURCE_DPI).unwrap_or(1.0);
-    let scene = build_scene(data, background.map(Rgba::from_tuple));
-    let vb = scene.viewbox;
+    let arrow_labels = resolve_arrow_labels(&data.elements);
+    let vb = calculate_viewbox_with_labels(&data.elements, &arrow_labels);
     let (width, height) = raster_size(vb.width * scale, vb.height * scale)
         .context("Invalid PNG output dimensions")?;
 
@@ -70,6 +72,7 @@ pub fn render_to_png(
             el.id
         );
     }
+    let scene = build_scene_with_labels(data, background.map(Rgba::from_tuple), vb, arrow_labels);
     let mut pixmap =
         Pixmap::new(width, height).ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
 

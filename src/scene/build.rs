@@ -18,14 +18,14 @@ use crate::arrow_utils::{
 use crate::color_utils::{fill_color, has_stroke, parse_color};
 use crate::font_utils::{get_font_family, text_metrics};
 use crate::math_utils::calculate_center;
-use crate::models::{ExcalidrawData, ExcalidrawElement};
+use crate::models::{ExcalidrawData, ExcalidrawElement, ViewBox};
 use crate::rect_utils::{
     generate_rounded_diamond_path, generate_rounded_rect_path, get_corner_radius,
 };
 use crate::stroke_utils::get_stroke_dash_array;
-use crate::utils::{calculate_viewbox, contributes_bounds};
+use crate::utils::{calculate_viewbox_with_labels, contributes_bounds};
 
-use super::arrow_label::resolve_arrow_labels;
+use super::arrow_label::{ResolvedArrowLabel, resolve_arrow_labels};
 use super::frame::{build_frame, containing_frame, frame_clip};
 use super::freedraw;
 use super::static_elements::{build_embed, build_sticky_note};
@@ -40,7 +40,17 @@ const DEFAULT_FONT_SIZE: f64 = 20.0;
 /// Build a [`Scene`] from parsed Excalidraw data. `background` is stored for the
 /// backend to fill before drawing.
 pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
-    let viewbox = calculate_viewbox(&data.elements);
+    let arrow_labels = resolve_arrow_labels(&data.elements);
+    let viewbox = calculate_viewbox_with_labels(&data.elements, &arrow_labels);
+    build_scene_with_labels(data, background, viewbox, arrow_labels)
+}
+
+pub(crate) fn build_scene_with_labels(
+    data: &ExcalidrawData,
+    background: Option<Rgba>,
+    viewbox: ViewBox,
+    arrow_labels: HashMap<usize, ResolvedArrowLabel>,
+) -> Scene {
     let generator = Generator::default();
     let elements: HashMap<&str, &ExcalidrawElement> = data
         .elements
@@ -58,7 +68,6 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
             sticky_bound_text(index, &data.elements).map(|text_index| (index, text_index))
         })
         .collect();
-    let arrow_labels = resolve_arrow_labels(&data.elements);
     let bound_text: HashSet<usize> = arrow_labels
         .values()
         .map(|label| label.text_index)

@@ -1,5 +1,7 @@
 use crate::models::{ExcalidrawElement, ViewBox};
+use crate::scene::arrow_label::{ResolvedArrowLabel, resolve_arrow_labels};
 use anyhow::{Context, Result, bail, ensure};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufWriter, ErrorKind, Write};
 use std::path::Path;
@@ -149,9 +151,16 @@ pub(crate) fn contributes_bounds(element_type: &str) -> bool {
 
 /// Calculate the viewbox for non-deleted supported elements and frames.
 pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
+    let arrow_labels = resolve_arrow_labels(elements);
+    calculate_viewbox_with_labels(elements, &arrow_labels)
+}
+
+pub(crate) fn calculate_viewbox_with_labels(
+    elements: &[ExcalidrawElement],
+    arrow_labels: &HashMap<usize, ResolvedArrowLabel>,
+) -> ViewBox {
     const PADDING: f64 = 40.0;
 
-    let arrow_labels = crate::scene::arrow_label::resolve_arrow_labels(elements);
     let bound_text: std::collections::HashSet<usize> = arrow_labels
         .values()
         .map(|label| label.text_index)

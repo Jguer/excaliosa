@@ -493,7 +493,7 @@ fn draw_image(
     opacity: f64,
     mask: Option<&Mask>,
 ) -> Result<()> {
-    let img = decode_embedded_png(&image.data_url)?;
+    let img = decode_embedded_png(&image.asset.data_url)?;
     let iw = img.width() as f32;
     let ih = img.height() as f32;
 

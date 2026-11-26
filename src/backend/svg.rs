@@ -24,7 +24,7 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>)
     let fonts = font_css(&scene.drawables);
 
     let mut body = String::new();
-    let mut definitions = String::new();
+    let mut definitions = image_definitions(&scene.drawables);
     if let Some(bg) = scene.background {
         if bg.3 > 0 {
             body.push_str(&format!(
@@ -56,6 +56,27 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>)
         "<svg viewBox=\"{} {} {} {}\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n{}{}{}</svg>",
         vb.min_x, vb.min_y, vb.width, vb.height, fonts, definitions, body
     )
+}
+
+fn image_definitions(drawables: &[Drawable]) -> String {
+    let mut seen = BTreeSet::new();
+    let mut definitions = String::new();
+    for image in drawables.iter().filter_map(|drawable| {
+        if let Primitive::Image(image) = &drawable.primitive {
+            Some(image)
+        } else {
+            None
+        }
+    }) {
+        if seen.insert(image.asset.id) {
+            definitions.push_str(&format!(
+                "    <image id=\"excaliosa-image-asset-{}\" x=\"0\" y=\"0\" width=\"1\" height=\"1\" href=\"{}\" preserveAspectRatio=\"none\"/>\n",
+                image.asset.id,
+                escape_xml(&image.asset.data_url)
+            ));
+        }
+    }
+    definitions
 }
 
 fn font_css(drawables: &[Drawable]) -> String {
@@ -367,8 +388,8 @@ fn image_svg(im: &ImagePrimitive, index: usize) -> String {
         (im.x, im.y, im.width, im.height)
     };
 
-    // Flip the cropped pixels around the element box, leaving its clip fixed.
-    let mut transform = String::new();
+    // Map the unit-sized shared definition to the original uncropped rectangle.
+    let mut transform = format!("translate({x} {y}) scale({width} {height})");
     if im.flip_x || im.flip_y {
         let sx = if im.flip_x { -1.0 } else { 1.0 };
         let sy = if im.flip_y { -1.0 } else { 1.0 };
@@ -382,16 +403,11 @@ fn image_svg(im: &ImagePrimitive, index: usize) -> String {
         } else {
             0.0
         };
-        transform = format!(" transform=\"translate({tx} {ty}) scale({sx} {sy})\"");
+        transform = format!("translate({tx} {ty}) scale({sx} {sy}) {transform}");
     }
     let image = format!(
-        "<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" href=\"{}\" preserveAspectRatio=\"none\"{}/>",
-        x,
-        y,
-        width,
-        height,
-        escape_xml(&im.data_url),
-        transform
+        "<use href=\"#excaliosa-image-asset-{}\" transform=\"{transform}\"/>",
+        im.asset.id
     );
     if im.crop.is_none() && im.corner_radius == 0.0 {
         return image;

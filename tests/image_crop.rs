@@ -92,14 +92,15 @@ fn svg_maps_crop_into_a_user_space_clip_before_flipping() {
         "<defs><clipPath id=\"excaliosa-image-clip-0\" clipPathUnits=\"userSpaceOnUse\"><rect x=\"40\" y=\"40\" width=\"80\" height=\"40\"/></clipPath></defs>"
     ));
     assert!(svg.contains(
-        "<image x=\"0\" y=\"40\" width=\"160\" height=\"40\" href=\"data:image/png;base64,"
+        "<image id=\"excaliosa-image-asset-0\" x=\"0\" y=\"0\" width=\"1\" height=\"1\" href=\"data:image/png;base64,"
+    ));
+    assert!(svg.contains(
+        "<use href=\"#excaliosa-image-asset-0\" transform=\"translate(0 40) scale(160 40)\"/>",
     ));
     let flipped = generate_svg(&one("flip-x"), Some((0, 0, 0, 0)));
-    assert!(flipped.contains("<image x=\"140\" y=\"40\" width=\"160\" height=\"40\""));
-    assert!(
-        flipped
-            .contains("preserveAspectRatio=\"none\" transform=\"translate(440 0) scale(-1 1)\"/>")
-    );
+    assert!(flipped.contains(
+        "<use href=\"#excaliosa-image-asset-0\" transform=\"translate(440 0) scale(-1 1) translate(140 40) scale(160 40)\"/>",
+    ));
 
     let rounded = generate_svg(&one("rounded-crop"), Some((0, 0, 0, 0)));
     assert!(
@@ -109,7 +110,9 @@ fn svg_maps_crop_into_a_user_space_clip_before_flipping() {
 
     let uncropped = generate_svg(&one("invalid-crop"), Some((0, 0, 0, 0)));
     assert!(!uncropped.contains("clipPath"));
-    assert!(uncropped.contains("<image x=\"180\" y=\"160\" width=\"80\" height=\"40\""));
+    assert!(uncropped.contains(
+        "<use href=\"#excaliosa-image-asset-0\" transform=\"translate(180 160) scale(80 40)\"/>",
+    ));
 }
 
 #[test]

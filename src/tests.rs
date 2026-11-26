@@ -29,7 +29,7 @@ mod renderer_tests {
             stroke_style: "solid".to_string(),
             roughness: 0.0,
             opacity: 100.0,
-            index: "a0".to_string(),
+            index: Some("a0".to_string()),
             version_nonce: Some(0),
             ..Default::default()
         }

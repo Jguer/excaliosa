@@ -21,6 +21,15 @@ fn default_transparent() -> String {
 fn default_fill_style() -> String {
     "hachure".to_string()
 }
+fn default_import_fill_style() -> String {
+    "solid".to_string()
+}
+fn default_import_stroke_width() -> f64 {
+    2.0
+}
+fn default_import_seed() -> i32 {
+    1
+}
 fn default_stroke_style() -> String {
     "solid".to_string()
 }
@@ -109,15 +118,18 @@ pub struct ExcalidrawElement {
     pub angle: f64,
     pub stroke_color: String,
     pub background_color: String,
+    #[serde(default = "default_import_fill_style")]
     pub fill_style: String,
+    #[serde(default = "default_import_stroke_width")]
     pub stroke_width: f64,
     pub stroke_style: String,
     pub roughness: f64,
     pub opacity: f64,
     pub group_ids: Vec<String>,
     pub frame_id: Option<String>,
-    pub index: String,
+    pub index: Option<String>,
     pub roundness: Option<RoundnessType>,
+    #[serde(default = "default_import_seed")]
     pub seed: i32,
     pub version_nonce: Option<i32>,
     pub is_deleted: bool,
@@ -181,7 +193,7 @@ impl Default for ExcalidrawElement {
             opacity: default_opacity(),
             group_ids: Vec::new(),
             frame_id: None,
-            index: String::new(),
+            index: None,
             roundness: None,
             seed: 0,
             version_nonce: None,

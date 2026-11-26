@@ -43,15 +43,16 @@ pub fn render_to_png(
 ) -> Result<()> {
     ensure!(dpi != Some(0), "PNG DPI must be positive");
     let scale = dpi.map(|d| f64::from(d) / SOURCE_DPI).unwrap_or(1.0);
-    let vb = calculate_viewbox(&data.elements);
-    let (width, height) = if !data.elements.is_empty()
-        && data.elements.iter().all(|el| el.is_deleted)
-    {
-        // An all-deleted document has no bounds to scale.
-        (1, 1)
+    // Match build_scene's viewbox for visible elements, but request the shared
+    // empty default explicitly until calculate_viewbox handles all-deleted inputs.
+    let elements: &[_] = if data.elements.iter().all(|el| el.is_deleted) {
+        &[]
     } else {
-        raster_size(vb.width * scale, vb.height * scale).context("Invalid PNG output dimensions")?
+        &data.elements
     };
+    let vb = calculate_viewbox(elements);
+    let (width, height) = raster_size(vb.width * scale, vb.height * scale)
+        .context("Invalid PNG output dimensions")?;
 
     // The shared scene skips missing and unsupported images; don't silently omit them in PNG.
     for el in data
@@ -74,7 +75,6 @@ pub fn render_to_png(
         );
     }
     let scene = build_scene(data, background.map(Rgba::from_tuple));
-    let vb = scene.viewbox;
 
     let mut pixmap =
         Pixmap::new(width, height).ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
@@ -442,6 +442,25 @@ mod tests {
         assert_eq!(raster_size(8192.0, 2048.0)?, (8192, 2048));
         for (w, h) in [(8192.0, 2048.1), (8192.1, 1.0), (0.0, 1.0), (1.0, f64::NAN)] {
             assert!(raster_size(w, h).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn empty_and_all_deleted_pngs_use_the_scaled_default_viewport() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let output = dir.path().join("drawing.png");
+        let mut data: ExcalidrawData = serde_json::from_value(serde_json::json!({
+            "type": "excalidraw",
+            "elements": [{"type": "rectangle", "width": 40, "height": 30, "isDeleted": true}]
+        }))?;
+        for elements in [std::mem::take(&mut data.elements), vec![]] {
+            data.elements = elements;
+            for (dpi, expected) in [(None, (800, 600)), (Some(48), (400, 300))] {
+                render_to_png(&data, &output, None, 75, dpi)?;
+                let file = std::fs::File::open(&output)?;
+                assert_eq!(png::Decoder::new(file).read_header_info()?.size(), expected);
+            }
         }
         Ok(())
     }

@@ -31,7 +31,7 @@ pub fn bundled_font(family: &str) -> BundledFont {
         "Liberation Sans" => BundledFont {
             bytes: LIBERATION_SANS_REGULAR,
             generic_family: "sans-serif",
-            // Its name table permits editable embedding but does not contain the license.
+            // The complete license is shipped separately in LiberationSans-LICENSE.txt.
             embed_in_svg: false,
         },
         "Cascadia Code" => BundledFont {

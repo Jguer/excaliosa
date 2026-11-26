@@ -11,6 +11,7 @@ use roughr::core::{Drawable as RoughDrawable, FillStyle, OpSet, OpSetType, OpTyp
 use roughr::generator::Generator;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::arrow_utils::{
     CARDINALITY_INNER_BAR_OFFSET, CARDINALITY_ONE_OR_MANY_BAR_OFFSET,
@@ -33,8 +34,8 @@ use super::frame::{build_frame, containing_frame, frame_clip};
 use super::freedraw;
 use super::static_elements::{build_embed, build_sticky_note};
 use super::{
-    Drawable, ImageCrop, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene, TextAlign,
-    TextPrimitive,
+    Drawable, ImageAsset, ImageCrop, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene,
+    TextAlign, TextPrimitive,
 };
 
 /// Default font size used when an element omits one (Excalidraw "medium").
@@ -87,6 +88,7 @@ pub(crate) fn build_scene_with_labels(
     let sticky_text_indices: HashSet<usize> = sticky_labels.values().copied().collect();
     let mut drawables = Vec::new();
     let mut embeds = Vec::new();
+    let mut image_assets = ImageAssets::default();
 
     for (index, el) in data
         .elements
@@ -109,14 +111,26 @@ pub(crate) fn build_scene_with_labels(
             apply_containing_frame(&mut built, el, &elements);
             drawables.extend(built);
             if let Some(text) = text
-                && let Some(mut label) = build_element(&generator, text, &data.files, cap_background)
+                && let Some(mut label) = build_element(
+                    &generator,
+                    text,
+                    &data.files,
+                    cap_background,
+                    &mut image_assets,
+                )
             {
                 apply_containing_frame(std::slice::from_mut(&mut label), text, &elements);
                 drawables.push(label);
             }
         } else if !sticky_text_indices.contains(&index)
             && !bound_text.contains(&index)
-            && let Some(mut drawable) = build_element(&generator, el, &data.files, cap_background)
+            && let Some(mut drawable) = build_element(
+                &generator,
+                el,
+                &data.files,
+                cap_background,
+                &mut image_assets,
+            )
         {
             if let Some(label) = arrow_labels.get(&index) {
                 drawable.label_gap = Some(label.gap);
@@ -125,6 +139,7 @@ pub(crate) fn build_scene_with_labels(
                     &data.elements[label.text_index],
                     &data.files,
                     cap_background,
+                    &mut image_assets,
                 )
                 .map(|mut label_drawable| {
                     if let Primitive::Text(text) = &mut label_drawable.primitive {
@@ -192,13 +207,14 @@ fn build_element(
     el: &ExcalidrawElement,
     files: &HashMap<String, Value>,
     cap_background: Rgba,
+    image_assets: &mut ImageAssets,
 ) -> Option<Drawable> {
     let primitive = match el.element_type.as_str() {
         "rectangle" | "ellipse" | "diamond" => Primitive::Paths(build_shape(generator, el)),
         "line" | "arrow" => Primitive::Paths(build_line(generator, el, cap_background)?),
         "freedraw" => Primitive::Paths(freedraw::build_freedraw(generator, el)?),
         "text" => Primitive::Text(build_text(el)?),
-        "image" => Primitive::Image(build_image(el, files)?),
+        "image" => Primitive::Image(build_image(el, files, image_assets)?),
         _ => return None,
     };
 
@@ -675,12 +691,44 @@ fn build_text(el: &ExcalidrawElement) -> Option<TextPrimitive> {
 // Images
 // ---------------------------------------------------------------------------
 
-fn build_image(el: &ExcalidrawElement, files: &HashMap<String, Value>) -> Option<ImagePrimitive> {
-    let file_id = el.file_id.as_deref()?;
-    let data_url = files.get(file_id)?.get("dataURL")?.as_str()?.to_string();
-    if !is_allowed_raster_data_url(&data_url) {
-        return None;
+#[derive(Default)]
+struct ImageAssets {
+    by_file_id: HashMap<String, Option<Arc<ImageAsset>>>,
+    next_id: u64,
+}
+
+impl ImageAssets {
+    fn resolve(
+        &mut self,
+        file_id: &str,
+        files: &HashMap<String, Value>,
+    ) -> Option<Arc<ImageAsset>> {
+        let next_id = &mut self.next_id;
+        self.by_file_id
+            .entry(file_id.to_owned())
+            .or_insert_with(|| {
+                let data_url = files.get(file_id)?.get("dataURL")?.as_str()?;
+                if !is_allowed_raster_data_url(data_url) {
+                    return None;
+                }
+                let asset = Arc::new(ImageAsset {
+                    id: *next_id,
+                    data_url: data_url.to_owned(),
+                });
+                *next_id += 1;
+                Some(asset)
+            })
+            .clone()
     }
+}
+
+fn build_image(
+    el: &ExcalidrawElement,
+    files: &HashMap<String, Value>,
+    image_assets: &mut ImageAssets,
+) -> Option<ImagePrimitive> {
+    let file_id = el.file_id.as_deref()?;
+    let asset = image_assets.resolve(file_id, files)?;
     // Negative scale components flip the image on that axis.
     let flip_x = el
         .scale
@@ -710,7 +758,7 @@ fn build_image(el: &ExcalidrawElement, files: &HashMap<String, Value>) -> Option
         y: el.y,
         width: el.width,
         height: el.height,
-        data_url,
+        asset,
         flip_x,
         flip_y,
         crop,

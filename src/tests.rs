@@ -341,8 +341,11 @@ mod renderer_tests {
         let svg = generate_svg(&data, None);
         assert!(svg.contains("<image"), "SVG should contain an <image> element");
         assert!(svg.contains("href=\"data:image/png;base64,"), "SVG image should embed the data URL");
-        assert!(svg.contains("width=\"100\""));
-        assert!(svg.contains("height=\"50\""));
+        assert!(svg.contains("width=\"1\""));
+        assert!(svg.contains("height=\"1\""));
+        assert!(svg.contains(
+            "<use href=\"#excaliosa-image-asset-0\" transform=\"translate(10 20) scale(100 50)\"/>"
+        ));
     }
 
     /// Regression: PNG output must be straight (non-premultiplied) alpha. A

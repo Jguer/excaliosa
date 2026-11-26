@@ -15,6 +15,7 @@ mod static_elements;
 pub use build::build_scene;
 
 use crate::models::ViewBox;
+use std::sync::Arc;
 
 /// Straight (non-premultiplied) 8-bit RGBA color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +99,13 @@ pub struct ImageCrop {
     pub height: f64,
 }
 
+/// An encoded raster payload shared by all placements of the same file.
+#[derive(Clone, Debug)]
+pub struct ImageAsset {
+    pub id: u64,
+    pub data_url: String,
+}
+
 /// A raster image referenced by a validated data URL.
 #[derive(Clone, Debug)]
 pub struct ImagePrimitive {
@@ -105,7 +113,7 @@ pub struct ImagePrimitive {
     pub y: f64,
     pub width: f64,
     pub height: f64,
-    pub data_url: String,
+    pub asset: Arc<ImageAsset>,
     pub flip_x: bool,
     pub flip_y: bool,
     pub crop: Option<ImageCrop>,

@@ -13,8 +13,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
-use crate::color_utils::{has_fill, has_stroke, parse_color};
-use crate::font_utils::{get_font_family, get_line_height, get_vertical_offset};
+use crate::color_utils::{fill_color, has_stroke, parse_color};
+use crate::font_utils::{get_font_family, text_metrics};
 use crate::math_utils::calculate_center;
 use crate::models::{ExcalidrawData, ExcalidrawElement};
 use crate::rect_utils::{generate_rounded_rect_path, get_corner_radius};
@@ -92,11 +92,10 @@ fn build_element(
 
 fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath> {
     let should_stroke = has_stroke(el);
-    let should_fill = has_fill(el);
     let stroke = should_stroke.then(|| Rgba::from_tuple(parse_color(&el.stroke_color)));
-    let fill = should_fill.then(|| Rgba::from_tuple(parse_color(&el.background_color)));
+    let fill = fill_color(el).map(Rgba::from_tuple);
     let dash = get_stroke_dash_array(&el.stroke_style, el.stroke_width);
-    let opts = rough_options(el, should_stroke, should_fill);
+    let opts = rough_options(el, should_stroke, fill.is_some());
 
     let drawable = match el.element_type.as_str() {
         "rectangle" => {
@@ -154,12 +153,15 @@ fn build_line(
     // Upstream considers a line closed when its endpoints are within 8 px at 1× zoom.
     let first = points[0];
     let last = points[points.len() - 1];
-    let should_fill = el.element_type == "line"
+    let fill = if el.element_type == "line"
         && points.len() >= 3
         && (last.0 - first.0).hypot(last.1 - first.1) <= 8.0
-        && has_fill(el);
-    let fill = should_fill.then(|| Rgba::from_tuple(parse_color(&el.background_color)));
-    let opts = rough_options(el, should_stroke, should_fill);
+    {
+        fill_color(el).map(Rgba::from_tuple)
+    } else {
+        None
+    };
+    let opts = rough_options(el, should_stroke, fill.is_some());
     let shaft = if elbowed && abs.len() >= 3 {
         match build_elbow_arrow_path(&abs, 16.0) {
             Some(d) => generator.path::<f64>(d, &Some(opts)),
@@ -167,7 +169,7 @@ fn build_line(
         }
     } else if curved {
         generator.curve::<f64>(&to_points(&abs), &Some(opts))
-    } else if should_fill {
+    } else if fill.is_some() {
         generator.polygon::<f64>(&to_points(&abs), &Some(opts))
     } else {
         generator.linear_path::<f64>(&to_points(&abs), false, &Some(opts))
@@ -330,6 +332,8 @@ fn build_text(el: &ExcalidrawElement) -> Option<TextPrimitive> {
         return None;
     }
     let font_size = el.font_size.unwrap_or(DEFAULT_FONT_SIZE);
+    let font_family = get_font_family(el.font_family);
+    let (line_height, baseline_offset) = text_metrics(font_family, font_size, el.line_height);
     let align = match el.text_align.as_deref() {
         Some("center") => TextAlign::Center,
         Some("right") => TextAlign::Right,
@@ -339,12 +343,13 @@ fn build_text(el: &ExcalidrawElement) -> Option<TextPrimitive> {
         content,
         x: el.x,
         y: el.y,
-        baseline_offset: get_vertical_offset(el.vertical_align.as_deref(), font_size),
+        // The stored y already incorporates container vertical alignment.
+        baseline_offset,
         font_size,
-        font_family: get_font_family(el.font_family),
+        font_family,
         color: Rgba::from_tuple(parse_color(&el.stroke_color)),
         align,
-        line_height: get_line_height(font_size, el.line_height),
+        line_height,
         container_width: el.width,
     })
 }

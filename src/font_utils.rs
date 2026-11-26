@@ -1,16 +1,23 @@
-/// Get font family name based on Excalidraw font ID
-/// Maps font IDs to family names that match the loaded fonts
-/// 
-/// Font ID mapping:
-/// - None/0: "Excalifont" (default)
-/// - 1: "Liberation Sans"
-/// - 2: "Cascadia Code"
+/// Map Excalidraw font IDs to their bundled equivalents.
 pub fn get_font_family(font_id: Option<i32>) -> &'static str {
     match font_id {
-        Some(1) => "Liberation Sans",
-        Some(2) => "Cascadia Code",
-        _ => "Excalifont", // Default or ID 0
+        Some(2 | 9) => "Liberation Sans", // Helvetica or Liberation Sans
+        Some(3) => "Cascadia Code",
+        _ => "Excalifont", // ID 5, legacy Virgil (1), or any unavailable font
     }
+}
+
+/// Line height and alphabetic baseline measured from the top of a line box.
+pub(crate) fn text_metrics(family: &str, size: f64, line_height: Option<f64>) -> (f64, f64) {
+    // From the bundled fonts' head/hhea tables; center the font in the line box.
+    let (units_per_em, ascent, descent, default_line_height) = match family {
+        "Liberation Sans" => (2048.0, 1854.0, 434.0, 1.15),
+        "Cascadia Code" => (2048.0, 1900.0, 480.0, 1.2),
+        _ => (1000.0, 886.0, 374.0, 1.25),
+    };
+    let height = line_height.unwrap_or(default_line_height) * size;
+    let baseline = (height + size * (ascent - descent) / units_per_em) / 2.0;
+    (height, baseline)
 }
 
 /// Get SVG text-anchor attribute value based on text alignment

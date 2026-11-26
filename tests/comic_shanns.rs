@@ -85,7 +85,7 @@ fn document(elements: Value) -> ExcalidrawData {
     serde_json::from_value(json!({"type": "excalidraw", "elements": elements})).unwrap()
 }
 
-fn rendered_rgba(font_family: i32, text: &str) -> Vec<u8> {
+fn rendered_rgba(font_family: i32, text: &str, line_height: f64) -> Vec<u8> {
     let data = document(json!([{
         "type": "text",
         "x": 0,
@@ -95,7 +95,7 @@ fn rendered_rgba(font_family: i32, text: &str) -> Vec<u8> {
         "text": text,
         "fontFamily": font_family,
         "fontSize": 48,
-        "lineHeight": 1.25,
+        "lineHeight": line_height,
         "strokeColor": "#000000"
     }]));
     let directory = tempfile::tempdir().unwrap();
@@ -202,12 +202,12 @@ fn svg_embeds_the_bundled_face_once_only_when_id_8_is_used() {
 
 #[test]
 fn png_uses_comic_shanns_outlines_not_excalifont_or_notdef() {
-    let comic = rendered_rgba(8, "Comic Shanns");
-    let excalifont = rendered_rgba(5, "Comic Shanns");
+    let comic = rendered_rgba(8, "Comic Shanns", 1.25);
+    let excalifont = rendered_rgba(5, "Comic Shanns", 1.238);
     assert_ne!(comic, excalifont);
     assert!(comic.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0));
 
-    let supported = rendered_rgba(8, "λ→");
-    let notdef = rendered_rgba(8, "☃☃");
+    let supported = rendered_rgba(8, "λ→", 1.25);
+    let notdef = rendered_rgba(8, "☃☃", 1.25);
     assert_ne!(supported, notdef);
 }

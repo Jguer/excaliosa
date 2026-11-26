@@ -303,8 +303,10 @@ fn svg_and_transparent_png_contain_the_fixture_ink() -> Result<(), Box<dyn Error
     ] {
         assert!(
             bytes
-                .chunks_exact(4)
-                .any(|pixel| { pixel[3] == 255 && pixel[..3] == expected }),
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel[3] == 255 && pixel[..3] == expected),
             "missing RGB {expected:?}"
         );
     }

@@ -178,16 +178,24 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
             max_y = max_y.max(ry);
         };
         match (el.element_type.as_str(), el.points.as_deref()) {
-            ("freedraw", points) => {
-                if let Some(outline) = crate::scene::freedraw::outline(el) {
-                    for (x, y) in outline {
-                        include(x, y);
-                    }
-                } else if let Some(points) = points {
-                    for &(x, y) in points {
-                        let (x, y) = (el.x + x, el.y + y);
-                        if x.is_finite() && y.is_finite() {
-                            include(x, y);
+            ("freedraw", _) => {
+                if el.opacity > 0.0
+                    && let Some(paths) = crate::scene::freedraw::build_freedraw(
+                        &roughr::generator::Generator::default(),
+                        el,
+                    )
+                {
+                    for op in paths.iter().flat_map(|path| &path.ops) {
+                        match *op {
+                            crate::scene::PathOp::Move(x, y) | crate::scene::PathOp::Line(x, y) => {
+                                include(x, y)
+                            }
+                            crate::scene::PathOp::Cubic(x1, y1, x2, y2, x, y) => {
+                                include(x1, y1);
+                                include(x2, y2);
+                                include(x, y);
+                            }
+                            crate::scene::PathOp::Close => {}
                         }
                     }
                 }

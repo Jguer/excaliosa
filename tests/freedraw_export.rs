@@ -100,6 +100,21 @@ fn recorded_pressure_changes_width_but_constant_ink_ignores_it() {
     let constant_b = scene_for(changed);
     assert_eq!(ink_ops(&constant_a), ink_ops(&constant_b));
 
+    let mut straight = mark(Some("constant"));
+    straight.points = Some(vec![(0.0, 0.0), (100.0, 0.0)]);
+    let straight = scene_for(straight);
+    let (min_y, max_y) =
+        ink_ops(&straight)
+            .iter()
+            .fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(min_y, max_y), op| match *op {
+                    PathOp::Move(_, y) | PathOp::Line(_, y) => (min_y.min(y), max_y.max(y)),
+                    _ => (min_y, max_y),
+                },
+            );
+    assert!((max_y - min_y - 11.2).abs() < 1e-9);
+
     let unknown = scene_for(mark(Some("future-mode")));
     let default = scene_for(mark(None));
     assert_eq!(ink_ops(&unknown), ink_ops(&default));
@@ -108,15 +123,16 @@ fn recorded_pressure_changes_width_but_constant_ink_ignores_it() {
 
 #[test]
 fn malformed_pressure_and_repeated_points_fall_back_safely() {
-    let mut malformed = mark(None);
-    malformed.points = Some(vec![
-        (0.0, 0.0),
-        (0.0, 0.0),
-        (30.0, 10.0),
-        (30.0, 10.0),
-        (60.0, 0.0),
-    ]);
-    malformed.pressures = Some(vec![f64::NAN]);
+    let mut malformed: ExcalidrawElement = serde_json::from_str(
+        r#"{
+            "type": "freedraw",
+            "strokeWidth": 4,
+            "points": [[0, 0], [0, 0], [30, 10], [30, 10], [60, 0]],
+            "pressures": [0.5, null]
+        }"#,
+    )
+    .unwrap();
+    assert_eq!(malformed.pressures, None);
     let actual = scene_for(malformed.clone());
     assert!(ink_ops(&actual).iter().all(|op| match *op {
         PathOp::Move(x, y) | PathOp::Line(x, y) => x.is_finite() && y.is_finite(),
@@ -132,6 +148,79 @@ fn malformed_pressure_and_repeated_points_fall_back_safely() {
     repeated.pressures = Some(vec![1.0, 1.0, 0.5, 0.0]);
     let deduplicated = scene_for(mark(None));
     assert_eq!(ink_ops(&scene_for(repeated)), ink_ops(&deduplicated));
+}
+
+#[test]
+fn out_and_back_stroke_produces_visible_ink() {
+    let mut reversed = mark(Some("constant"));
+    reversed.points = Some(vec![(0.0, 0.0), (40.0, 0.0), (0.0, 0.0)]);
+    reversed.stroke_options.as_mut().unwrap().streamline = Some(0.0);
+    let scene = scene_for(reversed);
+    assert_eq!(scene.drawables.len(), 1);
+    assert_eq!(
+        paths(&scene.drawables[0])[0].fill,
+        Some(Rgba(30, 30, 30, 255))
+    );
+    assert!(ink_ops(&scene).iter().any(|op| match *op {
+        PathOp::Move(x, _) | PathOp::Line(x, _) => x > 40.0,
+        _ => false,
+    }));
+}
+
+#[test]
+fn loop_fill_is_inside_the_standalone_viewport() {
+    let mut loop_mark = mark(None);
+    loop_mark.points = Some(vec![(0.0, 0.0), (100.0, -100.0), (200.0, 0.0), (0.0, 0.0)]);
+    loop_mark.background_color = "#ffd43b".into();
+    loop_mark.stroke_options.as_mut().unwrap().streamline = Some(0.75);
+    let scene = scene_for(loop_mark);
+    assert!(paths(&scene.drawables[0]).len() >= 2);
+    let mut min_y = f64::INFINITY;
+    for op in paths(&scene.drawables[0]).iter().flat_map(|path| &path.ops) {
+        let points: &[(f64, f64)] = match *op {
+            PathOp::Move(x, y) | PathOp::Line(x, y) => &[(x, y)],
+            PathOp::Cubic(x1, y1, x2, y2, x, y) => &[(x1, y1), (x2, y2), (x, y)],
+            PathOp::Close => &[],
+        };
+        for &(_, y) in points {
+            min_y = min_y.min(y);
+            assert!(y >= scene.viewbox.min_y, "fill clipped at y={y}");
+            assert!(y <= scene.viewbox.min_y + scene.viewbox.height);
+        }
+    }
+    assert!(min_y < -90.0);
+}
+
+#[test]
+fn transparent_off_canvas_mark_does_not_expand_png_viewport() -> Result<(), Box<dyn Error>> {
+    let dot = ExcalidrawElement {
+        element_type: "freedraw".into(),
+        stroke_width: 4.0,
+        points: Some(vec![(0.0, 0.0)]),
+        pressures: Some(vec![1.0]),
+        ..Default::default()
+    };
+    let invisible = ExcalidrawElement {
+        element_type: "freedraw".into(),
+        x: 10000.0,
+        stroke_color: "transparent".into(),
+        background_color: "transparent".into(),
+        points: Some(vec![(0.0, 0.0), (100.0, 0.0), (0.0, 0.0)]),
+        ..Default::default()
+    };
+    let mut data = fixture();
+    data.elements = vec![dot, invisible];
+    let scene = build_scene(&data, None);
+    assert_eq!(scene.drawables.len(), 1);
+    assert_eq!((scene.viewbox.width, scene.viewbox.height), (97.0, 97.0));
+
+    let directory = tempfile::tempdir()?;
+    let output = directory.path().join("transparent.png");
+    render_to_png(&data, &output, Some((0, 0, 0, 0)), 75, None)?;
+    let decoder = png::Decoder::new(std::fs::File::open(output)?);
+    let reader = decoder.read_info()?;
+    assert_eq!((reader.info().width, reader.info().height), (97, 97));
+    Ok(())
 }
 
 #[test]

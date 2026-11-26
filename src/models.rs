@@ -24,6 +24,12 @@ fn default_fill_style() -> String {
 fn default_stroke_style() -> String {
     "solid".to_string()
 }
+fn deserialize_pressures<'de, D>(deserializer: D) -> Result<Option<Vec<f64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<Vec<f64>>::deserialize(deserializer).unwrap_or_default())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -73,6 +79,7 @@ pub struct ExcalidrawElement {
     pub last_committed_point: Option<Vec<f64>>,
     pub elbowed: Option<bool>,
     // Freehand element fields (type="freedraw")
+    #[serde(default, deserialize_with = "deserialize_pressures")]
     pub pressures: Option<Vec<f64>>,
     pub simulate_pressure: bool,
     pub stroke_options: Option<StrokeOptions>,

@@ -25,7 +25,7 @@ struct Sample {
     pressure: f64,
 }
 
-pub(super) fn build_freedraw(
+pub(crate) fn build_freedraw(
     generator: &Generator,
     el: &ExcalidrawElement,
 ) -> Option<Vec<PaintedPath>> {
@@ -46,7 +46,9 @@ pub(super) fn build_freedraw(
         ));
     }
 
-    if has_stroke(el)
+    if let Some(stroke) = has_stroke(el)
+        .then(|| parse_color(&el.stroke_color))
+        .filter(|color| color.3 > 0)
         && let Some(outline) = outline(el)
     {
         let mut ops = Vec::with_capacity(outline.len() + 2);
@@ -55,7 +57,7 @@ pub(super) fn build_freedraw(
         ops.push(PathOp::Close);
         out.push(PaintedPath {
             ops,
-            fill: Some(Rgba::from_tuple(parse_color(&el.stroke_color))),
+            fill: Some(Rgba::from_tuple(stroke)),
             stroke: None,
             stroke_width: 0.0,
             dash: None,
@@ -94,7 +96,7 @@ pub(crate) fn outline(el: &ExcalidrawElement) -> Option<Vec<(f64, f64)>> {
 
     let radius = |pressure: f64| {
         if constant {
-            size / 2.0
+            size
         } else {
             let eased = (pressure * std::f64::consts::FRAC_PI_2).sin();
             size / 2.0 * (1.0 - THINNING * (1.0 - eased))
@@ -110,11 +112,20 @@ pub(crate) fn outline(el: &ExcalidrawElement) -> Option<Vec<(f64, f64)>> {
     for (i, sample) in samples.iter().enumerate() {
         let previous = samples[i.saturating_sub(1)].point;
         let next = samples[(i + 1).min(samples.len() - 1)].point;
-        let (tx, ty) = unit_vector(previous, next)?;
+        let reversal = unit_vector(previous, next).is_none();
+        let (tx, ty) = if reversal {
+            unit_vector(samples[i - 1].point, sample.point)?
+        } else {
+            unit_vector(previous, next)?
+        };
         let normal = (-ty, tx);
         let r = radius(sample.pressure);
         left.push((sample.point.0 + normal.0 * r, sample.point.1 + normal.1 * r));
         right.push((sample.point.0 - normal.0 * r, sample.point.1 - normal.1 * r));
+        if reversal {
+            append_cap(&mut left, sample.point, (tx, ty), r, false);
+            append_cap(&mut right, sample.point, (tx, ty), r, true);
+        }
     }
 
     let start_tangent = unit_vector(samples[0].point, samples[1].point)?;

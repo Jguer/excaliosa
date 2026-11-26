@@ -442,17 +442,25 @@ fn image_clip(
     .context("Invalid embedded PNG clip geometry")?;
     let path = if image.corner_radius > 0.0 {
         let r = image.corner_radius as f32;
+        let c = r * 0.552_284_8;
         let (left, top, right, bottom) = (rect.left(), rect.top(), rect.right(), rect.bottom());
         let mut pb = PathBuilder::new();
         pb.move_to(left + r, top);
         pb.line_to(right - r, top);
-        pb.quad_to(right, top, right, top + r);
+        pb.cubic_to(right - r + c, top, right, top + r - c, right, top + r);
         pb.line_to(right, bottom - r);
-        pb.quad_to(right, bottom, right - r, bottom);
+        pb.cubic_to(
+            right,
+            bottom - r + c,
+            right - r + c,
+            bottom,
+            right - r,
+            bottom,
+        );
         pb.line_to(left + r, bottom);
-        pb.quad_to(left, bottom, left, bottom - r);
+        pb.cubic_to(left + r - c, bottom, left, bottom - r + c, left, bottom - r);
         pb.line_to(left, top + r);
-        pb.quad_to(left, top, left + r, top);
+        pb.cubic_to(left, top + r - c, left + r - c, top, left + r, top);
         pb.close();
         pb.finish().context("Invalid embedded PNG rounded clip")?
     } else {

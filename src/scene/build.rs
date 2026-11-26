@@ -412,15 +412,25 @@ fn validated_image_crop(el: &ExcalidrawElement) -> Option<ImageCrop> {
     let (x, y, width, height) = (field("x")?, field("y")?, field("width")?, field("height")?);
     let natural_width = field("naturalWidth")?;
     let natural_height = field("naturalHeight")?;
-    if x < 0.0
-        || y < 0.0
+    // Excalidraw's derived source-edge values can exceed the natural size by a few ulps.
+    let x_margin = natural_width * f64::EPSILON * 8.0;
+    let y_margin = natural_height * f64::EPSILON * 8.0;
+    if x < -x_margin
+        || y < -y_margin
         || width <= 0.0
         || height <= 0.0
         || natural_width <= 0.0
         || natural_height <= 0.0
-        || x + width > natural_width
-        || y + height > natural_height
+        || x + width > natural_width + x_margin
+        || y + height > natural_height + y_margin
     {
+        return None;
+    }
+    let x = x.clamp(0.0, natural_width);
+    let y = y.clamp(0.0, natural_height);
+    let width = width.min(natural_width - x);
+    let height = height.min(natural_height - y);
+    if width <= 0.0 || height <= 0.0 {
         return None;
     }
 
@@ -434,6 +444,27 @@ fn validated_image_crop(el: &ExcalidrawElement) -> Option<ImageCrop> {
     let uncropped_width = el.width / crop.width;
     let uncropped_height = el.height / crop.height;
     if !uncropped_width.is_finite() || !uncropped_height.is_finite() {
+        return None;
+    }
+
+    // PNG performs these operations in f32; reject values it cannot represent safely.
+    let raster_crop_width = crop.width as f32;
+    let raster_crop_height = crop.height as f32;
+    let raster_offset_x = (crop.x * uncropped_width) as f32;
+    let raster_offset_y = (crop.y * uncropped_height) as f32;
+    if raster_crop_width <= 0.0
+        || raster_crop_height <= 0.0
+        || ![
+            el.width as f32 / raster_crop_width,
+            el.height as f32 / raster_crop_height,
+            raster_offset_x,
+            raster_offset_y,
+            raster_offset_x + el.width as f32,
+            raster_offset_y + el.height as f32,
+        ]
+        .into_iter()
+        .all(f32::is_finite)
+    {
         return None;
     }
     Some(crop)

@@ -113,6 +113,25 @@ fn svg_maps_crop_into_a_user_space_clip_before_flipping() {
 }
 
 #[test]
+fn horizontal_crop_allows_rounding_at_the_natural_height() {
+    let mut data = one("crop");
+    data.elements[0].height = 183.0;
+    let crop = data.elements[0].crop.as_mut().unwrap();
+    crop["naturalHeight"] = json!(50);
+    crop["height"] = json!(183.0 * (50.0 / 183.0));
+
+    let scene = build_scene(&data, None);
+    let Primitive::Image(image) = &scene.drawables[0].primitive else {
+        panic!("expected image");
+    };
+    let crop = image.crop.expect("horizontal crop should be preserved");
+    assert_eq!(
+        (crop.x, crop.y, crop.width, crop.height),
+        (0.25, 0.0, 0.5, 1.0)
+    );
+}
+
+#[test]
 fn png_crop_composes_horizontal_vertical_flips_and_rotation() -> Result<()> {
     for (id, expected) in [
         ("crop", [GREEN, BLUE, MAGENTA, WHITE]),
@@ -160,20 +179,35 @@ fn png_rounded_image_corners_are_transparent() -> Result<()> {
 }
 
 #[test]
+fn png_rounded_clip_matches_the_circular_svg_arc() -> Result<()> {
+    let mut data = one("rounded");
+    data.elements[0].width = 128.0;
+    data.elements[0].height = 128.0;
+    let element = &data.elements[0];
+    let raster = render(&data)?;
+
+    assert_eq!(raster.pixel(element.x + 8.0, element.y + 8.0)[3], 0);
+    Ok(())
+}
+
+#[test]
 fn malformed_crop_falls_back_to_the_uncropped_image() -> Result<()> {
     let valid = fixture().elements[0].crop.clone().unwrap();
     let mut zero_width = valid.clone();
     zero_width["width"] = json!(0);
     let mut negative_x = valid.clone();
     negative_x["x"] = json!(-1);
-    let mut outside = valid;
+    let mut outside = valid.clone();
     outside["width"] = json!(4);
+    let mut too_small_for_raster = valid;
+    too_small_for_raster["width"] = json!(1e-50);
     for crop in [
         json!("invalid"),
         json!({"x": 1, "y": 0, "width": 2}),
         zero_width,
         negative_x,
         outside,
+        too_small_for_raster,
     ] {
         let mut data = one("crop");
         data.elements[0].crop = Some(crop);
@@ -182,6 +216,7 @@ fn malformed_crop_falls_back_to_the_uncropped_image() -> Result<()> {
             panic!("expected image");
         };
         assert!(image.crop.is_none());
+        render(&data)?;
     }
 
     let data = one("invalid-crop");

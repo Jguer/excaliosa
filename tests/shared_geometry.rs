@@ -82,7 +82,7 @@ fn bounds_keep_frames_but_not_unsupported_elements() {
         ..Default::default()
     };
     let unsupported = ExcalidrawElement {
-        element_type: "freedraw".into(),
+        element_type: "selection".into(),
         x: 1_000.0,
         ..Default::default()
     };

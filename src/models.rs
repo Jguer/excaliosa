@@ -24,6 +24,12 @@ fn default_fill_style() -> String {
 fn default_stroke_style() -> String {
     "solid".to_string()
 }
+fn deserialize_pressures<'de, D>(deserializer: D) -> Result<Option<Vec<f64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<Vec<f64>>::deserialize(deserializer).unwrap_or_default())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -72,6 +78,11 @@ pub struct ExcalidrawElement {
     pub points: Option<Vec<(f64, f64)>>,
     pub last_committed_point: Option<Vec<f64>>,
     pub elbowed: Option<bool>,
+    // Freehand element fields (type="freedraw")
+    #[serde(default, deserialize_with = "deserialize_pressures")]
+    pub pressures: Option<Vec<f64>>,
+    pub simulate_pressure: bool,
+    pub stroke_options: Option<StrokeOptions>,
     // Image element fields (type="image")
     pub file_id: Option<String>,
     pub scale: Option<Vec<f64>>,
@@ -125,12 +136,22 @@ impl Default for ExcalidrawElement {
             points: None,
             last_committed_point: None,
             elbowed: None,
+            pressures: None,
+            simulate_pressure: false,
+            stroke_options: None,
             file_id: None,
             scale: None,
             crop: None,
             version: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StrokeOptions {
+    pub variability: Option<String>,
+    pub streamline: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

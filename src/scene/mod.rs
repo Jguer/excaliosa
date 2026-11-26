@@ -7,6 +7,7 @@
 //! two backends render identical output.
 
 pub mod build;
+pub(crate) mod freedraw;
 
 pub use build::build_scene;
 

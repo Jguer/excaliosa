@@ -37,8 +37,10 @@ fn non_square_diamond_uses_separate_radii_and_vertex_controls() {
         ..diamond(true, 0.0)
     };
     assert_eq!(
-        generate_rounded_diamond_path(&element),
-        "M 135 32.5 L 185 57.5 C 210 70, 210 70, 185 82.5 L 135 107.5 C 110 120, 110 120, 85 107.5 L 35 82.5 C 10 70, 10 70, 35 57.5 L 85 32.5 C 110 20, 110 20, 135 32.5"
+        generate_rounded_diamond_path(&element).as_deref(),
+        Some(
+            "M 135 32.5 L 185 57.5 C 210 70, 210 70, 185 82.5 L 135 107.5 C 110 120, 110 120, 85 107.5 L 35 82.5 C 10 70, 10 70, 35 57.5 L 85 32.5 C 110 20, 110 20, 135 32.5"
+        )
     );
 }
 
@@ -61,6 +63,23 @@ fn zero_roughness_unrounded_diamond_keeps_its_original_polygon() {
             .any(|op| matches!(op, PathOp::Move(x, y) if *x == 125.0 && *y == 12.5))
     );
     assert!(rounded.iter().flatten().any(|op| matches!(op, PathOp::Cubic(x1, y1, x2, y2, _, _) if *x1 == 200.0 && *y1 == 50.0 && x1 == x2 && y1 == y2)));
+}
+
+#[test]
+fn unsafe_rounded_diamonds_fall_back_to_polygons() {
+    let extreme_coordinate = ExcalidrawElement {
+        x: 1e308,
+        ..diamond(true, 1.0)
+    };
+    let extreme_span = ExcalidrawElement {
+        width: 1e308,
+        ..diamond(true, 1.0)
+    };
+    assert_eq!(generate_rounded_diamond_path(&extreme_span), None);
+
+    let mut unrounded = extreme_coordinate.clone();
+    unrounded.roundness = None;
+    assert_eq!(ops(extreme_coordinate), ops(unrounded));
 }
 
 #[test]

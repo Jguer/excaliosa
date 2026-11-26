@@ -100,6 +100,15 @@ fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath
     let dash = get_stroke_dash_array(&el.stroke_style, el.stroke_width);
     let options =
         |continuous_path| rough_options(el, should_stroke, fill.is_some(), continuous_path);
+    let polygon = || {
+        let points = vec![
+            Point2D::new(el.x + el.width / 2.0, el.y),
+            Point2D::new(el.x + el.width, el.y + el.height / 2.0),
+            Point2D::new(el.x + el.width / 2.0, el.y + el.height),
+            Point2D::new(el.x, el.y + el.height / 2.0),
+        ];
+        generator.polygon::<f64>(&points, &Some(options(false)))
+    };
 
     let drawable = match el.element_type.as_str() {
         "rectangle" => {
@@ -121,18 +130,13 @@ fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath
         }
         // diamond
         _ if el.roundness.is_some() => {
-            let d = generate_rounded_diamond_path(el);
-            generator.path::<f64>(d, &Some(options(true)))
+            if let Some(d) = generate_rounded_diamond_path(el) {
+                generator.path::<f64>(d, &Some(options(true)))
+            } else {
+                polygon()
+            }
         }
-        _ => {
-            let points = vec![
-                Point2D::new(el.x + el.width / 2.0, el.y),
-                Point2D::new(el.x + el.width, el.y + el.height / 2.0),
-                Point2D::new(el.x + el.width / 2.0, el.y + el.height),
-                Point2D::new(el.x, el.y + el.height / 2.0),
-            ];
-            generator.polygon::<f64>(&points, &Some(options(false)))
-        }
+        _ => polygon(),
     };
 
     lower_drawable(&drawable, stroke, fill, el.stroke_width, dash)
@@ -413,7 +417,7 @@ fn rough_options(
     let present = Srgba::new(0.0, 0.0, 0.0, 1.0);
     let mut o = Options::default();
     o.roughness = Some(adjusted_roughness(el) as f32);
-    o.preserve_vertices = Some(continuous_path || el.roughness < 1.0);
+    o.preserve_vertices = Some(continuous_path || el.roughness < 2.0);
     if el.element_type == "ellipse" {
         o.curve_fitting = Some(1.0);
     }
@@ -583,11 +587,18 @@ mod rough_option_tests {
             Some(true)
         );
 
-        let mut low_roughness = el.clone();
-        low_roughness.roughness = 0.5;
+        let mut default_roughness = el.clone();
+        default_roughness.roughness = 1.0;
         assert_eq!(
-            rough_options(&low_roughness, true, false, false).preserve_vertices,
+            rough_options(&default_roughness, true, false, false).preserve_vertices,
             Some(true)
+        );
+
+        let mut cartoonist_roughness = el.clone();
+        cartoonist_roughness.roughness = 2.0;
+        assert_eq!(
+            rough_options(&cartoonist_roughness, true, false, false).preserve_vertices,
+            Some(false)
         );
 
         let ellipse = element("ellipse", 100.0, 100.0, false);

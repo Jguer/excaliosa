@@ -1,5 +1,6 @@
 use excaliosa::fonts::{
-    BUNDLED_FONT_FALLBACK_ORDER, CASCADIA_CODE, EXCALIFONT_REGULAR, bundled_font,
+    BUNDLED_FONT_FALLBACK_ORDER, CASCADIA_CODE, COMIC_SHANNS_REGULAR, EXCALIFONT_REGULAR,
+    bundled_font,
 };
 use excaliosa::scene::Primitive;
 use excaliosa::{ExcalidrawData, build_scene, generate_svg, render_to_png};
@@ -111,6 +112,10 @@ fn render_single(content: &str, family: i32) -> Raster {
     )])
 }
 
+fn has_visible_pixels(raster: &Raster) -> bool {
+    raster.pixels.as_chunks::<4>().0.iter().any(|px| px[3] != 0)
+}
+
 fn mapped_glyph(font: &FontRef, ch: char) -> Option<GlyphId> {
     font.charmap()
         .map(ch)
@@ -154,15 +159,21 @@ fn fallback_symbols_use_cascadia_outlines_and_unsupported_scalars_match_notdef()
     let primary_hit = render_single("A", 5);
     let missing = render_single("🦄", 5);
     assert_ne!(primary_hit, missing);
-    assert!(
-        missing
-            .pixels
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .any(|px| px[3] != 0)
-    );
+    assert!(has_visible_pixels(&primary_hit));
+    assert!(has_visible_pixels(&missing));
     assert_eq!(missing, render_single("🦓", 5));
+}
+
+#[test]
+fn primary_face_wins_for_shared_glyphs() {
+    let comic = FontRef::new(COMIC_SHANNS_REGULAR).unwrap();
+    let cascadia = FontRef::new(CASCADIA_CODE).unwrap();
+    assert!(mapped_glyph(&comic, '→').is_some());
+    assert!(mapped_glyph(&cascadia, '→').is_some());
+
+    let primary = render_single("→", 2);
+    assert!(has_visible_pixels(&primary));
+    assert_ne!(primary, render_single("→", 3));
 }
 
 #[test]

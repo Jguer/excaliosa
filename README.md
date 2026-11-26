@@ -105,7 +105,7 @@ The bundled Comic Shanns 1.3.0 face was generated offline from Excalidraw's [`Co
 fontforge -lang=ff -c 'Open("ComicShanns-Regular.sfd"); Generate("fonts/ComicShanns-Regular.ttf")'
 ```
 
-Both exports preserve saved lines and explicit line heights; SVG also records left-to-right or right-to-left direction and logical text anchors. PNG uses bundled fonts for simple per-character glyph outlining, but does not perform complex text shaping, bidirectional reordering, emoji fallback, or SVG-style font fallback. Unsupported printable glyphs use the selected font's notdef glyph.
+Both exports preserve saved lines and explicit line heights; SVG also records left-to-right or right-to-left direction and logical text anchors. PNG uses only bundled fonts for simple per-character glyph outlining. It checks the selected face and then the other bundled faces before drawing the selected font's notdef glyph for unsupported printable characters. PNG does not perform complex text shaping, bidirectional reordering, emoji fallback, system font lookup, or SVG-style font fallback.
 
 ### More examples
 

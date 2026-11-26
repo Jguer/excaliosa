@@ -79,7 +79,8 @@ excaliosa path/to/diagram.json -o diagram.svg
 - -o, --output <FILE>: Output file path.
 	- Default: same as input filename with a `.png` extension.
 	- The output format is inferred from the extension: `.svg` for SVG, `.png` for PNG.
-	- Both formats are rendered from a single shared scene, so SVG and PNG output match geometrically.
+	- Both formats use the same scene for shape geometry. SVG exports text without embedding fonts; if Excalifont, Liberation Sans, or Cascadia Code is unavailable to the viewer, it may substitute a font and change text layout. PNG renders text with bundled fonts.
+	- PNG export renders embedded images only when they are base64-encoded PNGs. Other image formats (such as JPEG) are skipped.
 - -b, --background <HEX>: Background color to apply to the canvas. Accepts `#RRGGBB` or `#RRGGBBAA` (alpha supported), or the literal `transparent`.
 	- Examples: `--background "#ffffff"`, `--background "#121212cc"`, `--background transparent`.
 	- Applies to both PNG and SVG export. For SVG, a full-size background `<rect>` is inserted with `fill-opacity` derived from alpha.

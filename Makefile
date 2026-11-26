@@ -1,4 +1,4 @@
-.PHONY: build release test clean install help
+.PHONY: build release test test-cli clean install help fmt lint
 
 # Default target
 help:
@@ -25,23 +25,20 @@ test:
 	cargo test
 
 test-cli: release
-	@echo "Testing basic diagram conversion..."
-	./target/release/excaliosa test_diagram.json
-	@echo "Generated: test_diagram.png"
-	@echo ""
-	@echo "Testing complex diagram conversion..."
-	./target/release/excaliosa test_diagram_complex.json
-	@echo "Generated: test_diagram_complex.png"
-	@echo ""
-	@echo "Testing custom output..."
-	./target/release/excaliosa test_diagram.json -o /tmp/excaliosa_test.png
-	@echo "Generated: /tmp/excaliosa_test.png"
-	@echo ""
-	@echo "All tests completed successfully!"
+	@set -eu; \
+	dir=$$(mktemp -d target/cli-smoke.XXXXXX); \
+	trap 'rm -f "$$dir/arrows.json" "$$dir/arrows.png" "$$dir/roughness.png" "$$dir/arrows.svg"; rmdir "$$dir"' EXIT; \
+	cp examples/arrows.json "$$dir/arrows.json"; \
+	./target/release/excaliosa "$$dir/arrows.json"; \
+	./target/release/excaliosa examples/test_roughness.json -o "$$dir/roughness.png"; \
+	./target/release/excaliosa examples/arrows.json -o "$$dir/arrows.svg"; \
+	for png in "$$dir/arrows.png" "$$dir/roughness.png"; do \
+		test "$$(od -An -tx1 -N8 "$$png" | tr -d ' \n')" = 89504e470d0a1a0a; \
+	done; \
+	grep -q '^<svg ' "$$dir/arrows.svg"
 
 clean:
 	cargo clean
-	rm -f test_diagram.png test_diagram_complex.png my_custom_output.png
 
 install: release
 	cp target/release/excaliosa ~/.cargo/bin/

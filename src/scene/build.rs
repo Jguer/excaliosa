@@ -219,6 +219,12 @@ fn apply_containing_frame(
         drawable.opacity *= frame_opacity;
         drawable.frame_opacity = Some(frame_opacity);
         drawable.frame_clip = clip.clone();
+        if element.element_type != "stickynote"
+            && matches!(&drawable.primitive, Primitive::Paths(_))
+            && (frame_opacity - 1.0).abs() > 1e-9
+        {
+            drawable.path_compositing = PathCompositing::PerPaint;
+        }
     }
 }
 

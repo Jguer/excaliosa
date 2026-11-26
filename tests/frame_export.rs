@@ -318,6 +318,37 @@ fn render_data(data: &ExcalidrawData) -> (Raster, ViewBox) {
 }
 
 #[test]
+fn faded_frame_embed_composites_fill_and_stroke_separately() {
+    let frame = ExcalidrawElement {
+        id: "frame".to_owned(),
+        element_type: "frame".to_owned(),
+        width: 100.0,
+        height: 100.0,
+        opacity: 50.0,
+        ..Default::default()
+    };
+    let embed = ExcalidrawElement {
+        id: "embed".to_owned(),
+        element_type: "embeddable".to_owned(),
+        x: 20.0,
+        y: 20.0,
+        width: 60.0,
+        height: 60.0,
+        background_color: "#fff4e6".to_owned(),
+        fill_style: "solid".to_owned(),
+        stroke_width: 20.0,
+        roughness: 0.0,
+        frame_id: Some("frame".to_owned()),
+        link: Some(" ".to_owned()),
+        ..Default::default()
+    };
+    let data = wrap(vec![frame, embed]);
+    let (raster, view) = render_data(&data);
+    assert_eq!(raster.pixel(view, 50.0, 50.0)[3], 128);
+    assert!((191..=192).contains(&raster.pixel(view, 50.0, 25.0)[3]));
+}
+
+#[test]
 fn cropped_image_clip_intersects_its_containing_frame_clip() {
     let frame = ExcalidrawElement {
         id: "frame".to_owned(),

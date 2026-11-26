@@ -236,6 +236,9 @@ fn draw_painted(
     opacity: f64,
     mask: Option<&Mask>,
 ) {
+    if opacity <= 0.0 {
+        return;
+    }
     let Some(path) = build_path(&pp.ops) else {
         return;
     };

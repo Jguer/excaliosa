@@ -1,0 +1,113 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "legacy-linear-import-test",
+  "elements": [
+    {
+      "id": "legacy-draw",
+      "type": "draw",
+      "x": 20,
+      "y": 30,
+      "width": 120,
+      "height": 0,
+      "strokeColor": "#1e1e1e",
+      "strokeWidth": 4,
+      "roughness": 0,
+      "seed": 1,
+      "points": [[0, 0], [120, 0]]
+    },
+    {
+      "id": "dimensions-only-line",
+      "type": "line",
+      "x": 20,
+      "y": 90,
+      "width": 120,
+      "height": 40,
+      "strokeWidth": 4,
+      "roughness": 0,
+      "seed": 2
+    },
+    {
+      "id": "recovered-arrow",
+      "type": "arrow",
+      "x": 20,
+      "y": 190,
+      "width": 140,
+      "height": 0,
+      "strokeWidth": 4,
+      "roughness": 0,
+      "seed": 3,
+      "boundElements": [{"id": "recovered-label", "type": "text"}]
+    },
+    {
+      "id": "recovered-label",
+      "type": "text",
+      "x": 1000,
+      "y": 1000,
+      "width": 40,
+      "height": 20,
+      "text": "Recovered",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "containerId": "recovered-arrow",
+      "textAlign": "center"
+    },
+    {
+      "id": "null-cap-arrow",
+      "type": "arrow",
+      "x": 20,
+      "y": 250,
+      "width": 120,
+      "height": 0,
+      "points": null,
+      "startArrowhead": null,
+      "endArrowhead": null,
+      "strokeWidth": 4,
+      "roughness": 0,
+      "seed": 4
+    },
+    {
+      "id": "short-arrow",
+      "type": "arrow",
+      "x": 20,
+      "y": 310,
+      "width": 120,
+      "height": 0,
+      "points": [[0, 0]],
+      "endArrowhead": null,
+      "strokeWidth": 4,
+      "roughness": 0,
+      "seed": 5
+    },
+    {
+      "id": "translated-elbow",
+      "type": "arrow",
+      "x": 400,
+      "y": 30,
+      "width": 80,
+      "height": 80,
+      "points": [[0, 0], [80, 0], [80, 80]],
+      "elbowed": true,
+      "endArrowhead": null,
+      "strokeWidth": 4,
+      "roughness": 0,
+      "seed": 6
+    },
+    {
+      "id": "untouched-freedraw",
+      "type": "freedraw",
+      "x": 20,
+      "y": 390,
+      "width": 0,
+      "height": 0,
+      "points": [[0, 0]],
+      "pressures": [0],
+      "simulatePressure": false,
+      "strokeWidth": 4,
+      "roughness": 0,
+      "seed": 7
+    }
+  ],
+  "appState": {},
+  "files": {}
+}

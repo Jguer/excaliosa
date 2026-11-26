@@ -22,7 +22,9 @@ use crate::arrow_utils::{
 use crate::color_utils::{fill_color, has_stroke, parse_color, parse_scene_color};
 use crate::font_utils::{get_font_family, text_metrics};
 use crate::math_utils::calculate_center;
-use crate::models::{ArrowheadField, ExcalidrawData, ExcalidrawElement, ViewBox};
+use crate::models::{
+    ArrowheadField, ExcalidrawData, ExcalidrawElement, ViewBox, has_renderable_elbow_geometry,
+};
 use crate::rect_utils::{
     generate_rounded_diamond_path, generate_rounded_rect_path, get_corner_radius,
 };
@@ -337,6 +339,10 @@ fn build_line(
     if points.is_empty() {
         return None;
     }
+    let elbowed = el.element_type == "arrow" && el.elbowed.unwrap_or(false);
+    if elbowed && !has_renderable_elbow_geometry(el) {
+        return None;
+    }
 
     let abs: Vec<(f64, f64)> = points
         .iter()
@@ -345,7 +351,6 @@ fn build_line(
     let should_stroke = has_stroke(el);
     let stroke = should_stroke.then(|| Rgba::from_tuple(parse_color(&el.stroke_color)));
     let dash = get_stroke_dash_array(&el.stroke_style, el.stroke_width);
-    let elbowed = el.element_type == "arrow" && el.elbowed.unwrap_or(false);
     let curved = !elbowed && el.roundness.is_some() && points.len() >= 3;
     // Upstream considers a line closed when its endpoints are within 8 px at 1× zoom.
     let first = points[0];
@@ -358,7 +363,18 @@ fn build_line(
     } else {
         None
     };
-    let opts = rough_options(el, should_stroke, fill.is_some(), elbowed);
+    let mut opts = rough_options(el, should_stroke, fill.is_some(), elbowed);
+    if fill.is_some() && el.fill_style != "solid" {
+        let gap = f64::from(opts.hachure_gap.unwrap_or(0.0).max(0.1));
+        // roughr scans rotated world-space polygons; keep the outline when its step rounds away.
+        let scan_advances = abs.iter().all(|(x, y)| {
+            let extent = x.abs() + y.abs();
+            extent.is_finite() && extent + gap > extent && -extent + gap > -extent
+        });
+        if !scan_advances {
+            opts.fill = None;
+        }
+    }
     let shaft = if elbowed && abs.len() >= 3 {
         match build_elbow_arrow_path(&abs, 16.0) {
             Some(d) => generator.path::<f64>(d, &Some(opts)),

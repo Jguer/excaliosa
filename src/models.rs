@@ -38,6 +38,27 @@ where
     Ok(Option::<serde_json::Value>::deserialize(deserializer)?.and_then(|value| value.as_f64()))
 }
 
+fn deserialize_elements<'de, D>(deserializer: D) -> Result<Vec<ExcalidrawElement>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let mut elements = Vec::<ExcalidrawElement>::deserialize(deserializer)?;
+    for element in &mut elements {
+        if element.element_type == "draw" {
+            element.element_type = "line".into();
+        }
+        if matches!(element.element_type.as_str(), "line" | "arrow")
+            && element
+                .points
+                .as_ref()
+                .is_none_or(|points| points.len() < 2)
+        {
+            element.points = Some(vec![(0.0, 0.0), (element.width, element.height)]);
+        }
+    }
+    Ok(elements)
+}
+
 /// Modern arrowhead fields distinguish an omitted value (legacy/default
 /// fallback) from an explicit null (no cap).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -242,6 +263,7 @@ pub struct ExcalidrawData {
     pub version: Option<i32>,
     pub version_nonce: Option<i32>,
     pub source: Option<String>,
+    #[serde(deserialize_with = "deserialize_elements")]
     pub elements: Vec<ExcalidrawElement>,
     #[serde(default)]
     pub app_state: HashMap<String, serde_json::Value>,
@@ -255,4 +277,30 @@ pub struct ViewBox {
     pub min_y: f64,
     pub width: f64,
     pub height: f64,
+}
+
+pub(crate) fn has_renderable_elbow_geometry(element: &ExcalidrawElement) -> bool {
+    let Some((first, points)) = element
+        .points
+        .as_deref()
+        .and_then(|points| points.split_first())
+    else {
+        return false;
+    };
+    [
+        element.x,
+        element.y,
+        element.width,
+        element.height,
+        element.angle,
+    ]
+    .into_iter()
+    .all(f64::is_finite)
+        && (element.angle.to_degrees() as f32).is_finite()
+        && points.iter().chain([first]).all(|point| {
+            point.0.is_finite()
+                && point.1.is_finite()
+                && (point.0 - first.0).abs() <= 1e6
+                && (point.1 - first.1).abs() <= 1e6
+        })
 }

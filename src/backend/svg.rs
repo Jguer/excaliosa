@@ -13,8 +13,8 @@ use crate::font_utils::{normalize_newlines, text_direction};
 use crate::fonts::bundled_font;
 use crate::models::{ExcalidrawData, ViewBox};
 use crate::scene::{
-    Drawable, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign, TextPrimitive,
-    build_scene,
+    Drawable, ImagePrimitive, PaintedPath, PathCompositing, PathOp, Primitive, Rgba, TextAlign,
+    TextPrimitive, build_scene,
 };
 
 /// Generate an SVG document string for the given Excalidraw data.
@@ -109,10 +109,8 @@ fn render_drawable(
     viewbox: ViewBox,
     definitions: &mut String,
 ) -> String {
-    let separate_path_opacity = drawable
-        .frame_opacity
-        .is_some_and(|opacity| (opacity - 1.0).abs() > 1e-9)
-        && matches!(&drawable.primitive, Primitive::Paths(_));
+    let separate_path_opacity = matches!(&drawable.primitive, Primitive::Paths(_))
+        && drawable.path_compositing == PathCompositing::PerPaint;
     let inner = match &drawable.primitive {
         Primitive::Paths(paths) => paths
             .iter()
@@ -135,9 +133,7 @@ fn render_drawable(
         return String::new();
     }
 
-    // Fold ordinary element opacity and rotation into a wrapping group so overlapping
-    // rough passes composite as one layer. Frame-faded paths use separate paint alpha
-    // to match tiny-skia's fill/stroke compositing.
+    // Grouped paths composite before opacity; per-paint paths keep only rotation here.
     let mut attrs = String::new();
     if !separate_path_opacity && (drawable.opacity - 1.0).abs() > 1e-9 {
         attrs.push_str(&format!(" opacity=\"{:.4}\"", drawable.opacity));

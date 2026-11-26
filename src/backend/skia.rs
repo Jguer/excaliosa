@@ -21,8 +21,8 @@ use crate::models::ExcalidrawData;
 use crate::scene::arrow_label::resolve_arrow_labels;
 use crate::scene::build::{build_scene_with_labels, measure_linear_elements};
 use crate::scene::{
-    FrameClip, ImagePrimitive, LabelGap, PaintedPath, PathOp, Primitive, Rgba, TextAlign,
-    TextPrimitive,
+    FrameClip, ImagePrimitive, LabelGap, PaintedPath, PathCompositing, PathOp, Primitive, Rgba,
+    TextAlign, TextPrimitive,
 };
 use crate::utils::{calculate_viewbox_with_labels, save_png_with_quality};
 
@@ -133,11 +133,7 @@ pub fn render_to_png(
         }
         let mask = label_mask.as_ref().or(frame_mask);
         match &drawable.primitive {
-            Primitive::Paths(paths)
-                if drawable
-                    .frame_opacity
-                    .is_some_and(|opacity| (opacity - 1.0).abs() > 1e-9) =>
-            {
+            Primitive::Paths(paths) if drawable.path_compositing == PathCompositing::PerPaint => {
                 for path in paths {
                     draw_painted(&mut pixmap, path, tf, drawable.opacity, mask);
                 }
@@ -240,6 +236,9 @@ fn draw_painted(
     opacity: f64,
     mask: Option<&Mask>,
 ) {
+    if opacity <= 0.0 {
+        return;
+    }
     let Some(path) = build_path(&pp.ops) else {
         return;
     };

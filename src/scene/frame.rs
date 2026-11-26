@@ -12,7 +12,10 @@ use crate::font_utils::text_metrics;
 use crate::fonts::LIBERATION_SANS_REGULAR;
 use crate::models::ExcalidrawElement;
 
-use super::{Drawable, FrameClip, PaintedPath, PathOp, Primitive, Rgba, TextAlign, TextPrimitive};
+use super::{
+    Drawable, FrameClip, PaintedPath, PathCompositing, PathOp, Primitive, Rgba, TextAlign,
+    TextPrimitive,
+};
 
 const FRAME_RADIUS: f64 = 8.0;
 const FRAME_NAME_FONT_SIZE: f64 = 14.0;
@@ -64,6 +67,7 @@ pub fn build_frame(element: &ExcalidrawElement) -> Vec<Drawable> {
             center: (0.0, 0.0),
             frame_clip: None,
             frame_opacity: None,
+            path_compositing: PathCompositing::Group,
         });
     }
     drawables.push(Drawable {
@@ -88,6 +92,7 @@ pub fn build_frame(element: &ExcalidrawElement) -> Vec<Drawable> {
         ),
         frame_clip: None,
         frame_opacity: None,
+        path_compositing: PathCompositing::Group,
     });
     drawables
 }

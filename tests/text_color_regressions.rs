@@ -40,7 +40,7 @@ fn svg_text_uses_top_anchored_baselines_and_keeps_both_opacities() {
             "strokeColor": "#1a2b",
             "opacity": 50,
         }));
-        assert!(svg.contains("font-family=\"Excalifont\""), "{svg}");
+        assert!(svg.contains("font-family=\"Excalifont, sans-serif\""));
         assert!(svg.contains("y=\"120.12\""), "{svg}");
         assert!(svg.contains("y=\"150.12\""), "{svg}");
         assert!(

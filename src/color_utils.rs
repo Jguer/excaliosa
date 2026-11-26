@@ -9,48 +9,12 @@ use crate::models::ExcalidrawElement;
 /// - Empty string => (0, 0, 0, 0)
 /// - Invalid format => (0, 0, 0, 255) - defaults to black
 pub fn parse_color(color_str: &str) -> (u8, u8, u8, u8) {
-    if color_str.eq_ignore_ascii_case("transparent") || color_str.is_empty() {
+    // Empty means "no color" (fully transparent); anything else defers to the
+    // fallible parser, defaulting to opaque black on malformed input.
+    if color_str.is_empty() {
         return (0, 0, 0, 0);
     }
-    
-    let trimmed = color_str.trim();
-    let hex = if let Some(rest) = trimmed.strip_prefix('#') {
-        rest
-    } else {
-        trimmed
-    };
-    
-    match hex.len() {
-        6 => {
-            // RRGGBB format
-            if let (Ok(r), Ok(g), Ok(b)) = (
-                u8::from_str_radix(&hex[0..2], 16),
-                u8::from_str_radix(&hex[2..4], 16),
-                u8::from_str_radix(&hex[4..6], 16),
-            ) {
-                (r, g, b, 255)
-            } else {
-                (0, 0, 0, 255) // Default to black on parse error
-            }
-        }
-        8 => {
-            // RRGGBBAA format
-            if let (Ok(r), Ok(g), Ok(b), Ok(a)) = (
-                u8::from_str_radix(&hex[0..2], 16),
-                u8::from_str_radix(&hex[2..4], 16),
-                u8::from_str_radix(&hex[4..6], 16),
-                u8::from_str_radix(&hex[6..8], 16),
-            ) {
-                (r, g, b, a)
-            } else {
-                (0, 0, 0, 255) // Default to black on parse error
-            }
-        }
-        _ => {
-            // Invalid format - default to black
-            (0, 0, 0, 255)
-        }
-    }
+    parse_color_result(color_str).unwrap_or((0, 0, 0, 255))
 }
 
 /// Parse a hex color string into RGBA with Result type (for error handling)

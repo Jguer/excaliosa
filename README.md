@@ -79,9 +79,7 @@ excaliosa path/to/diagram.json -o diagram.svg
 - -o, --output <FILE>: Output file path.
 	- Default: same as input filename with a `.png` extension.
 	- The output format is inferred from the extension: `.svg` for SVG, `.png` for PNG.
-- --legacy: Use the legacy SVG-based renderer instead of the default `rough_tiny_skia` PNG renderer.
-	- When PNG is requested and `--legacy` is set, the tool generates SVG first and then rasterizes it to PNG.
-	- Helpful if you need output that mirrors the SVG pipeline or for troubleshooting differences between renderers.
+	- Both formats are rendered from a single shared scene, so SVG and PNG output match geometrically.
 - -b, --background <HEX>: Background color to apply to the canvas. Accepts `#RRGGBB` or `#RRGGBBAA` (alpha supported), or the literal `transparent`.
 	- Examples: `--background "#ffffff"`, `--background "#121212cc"`, `--background transparent`.
 	- Applies to both PNG and SVG export. For SVG, a full-size background `<rect>` is inserted with `fill-opacity` derived from alpha.
@@ -106,9 +104,6 @@ excaliosa examples/arrows.json -o out.png
 
 # Export SVG directly
 excaliosa examples/arrows.json -o arrows.svg
-
-# Render PNG using the legacy SVG pipeline
-excaliosa examples/arrows.json --legacy -o legacy.png
 
 # Set a custom background color (opaque white)
 excaliosa examples/logo.json -b "#ffffff" -o logo_white.png

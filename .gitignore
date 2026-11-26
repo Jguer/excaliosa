@@ -1,4 +1,5 @@
 /target
+/.cargo-home
 *.png
 *.excalidraw.json
 my_custom_output.png

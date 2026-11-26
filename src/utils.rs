@@ -37,12 +37,17 @@ pub fn save_png_with_quality(
     
     let mut writer = encoder.write_header()
         .map_err(|e| anyhow::anyhow!("Failed to write PNG header: {e}"))?;
-    
-    // Write RGBA data
-    let data = pixmap.data();
-    writer.write_image_data(data)
+
+    // tiny-skia stores premultiplied RGBA; PNG expects straight (non-premultiplied)
+    // alpha. Demultiply every pixel so semi-transparent colors aren't darkened.
+    let mut rgba = Vec::with_capacity(pixmap.data().len());
+    for pixel in pixmap.pixels() {
+        let c = pixel.demultiply();
+        rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+    }
+    writer.write_image_data(&rgba)
         .map_err(|e| anyhow::anyhow!("Failed to write PNG data: {e}"))?;
-    
+
     Ok(())
 }
 
@@ -65,11 +70,26 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
     let mut max_y = f64::NEG_INFINITY;
 
     for el in elements {
-        if !el.is_deleted {
-            min_x = min_x.min(el.x);
-            min_y = min_y.min(el.y);
-            max_x = max_x.max(el.x + el.width);
-            max_y = max_y.max(el.y + el.height);
+        if el.is_deleted {
+            continue;
+        }
+        // Bound the element's rotated axis-aligned box. `angle` is in radians;
+        // for angle 0 this reduces to the plain (x, y, x+w, y+h) extent.
+        let (cx, cy) = (el.x + el.width / 2.0, el.y + el.height / 2.0);
+        let (sin, cos) = el.angle.sin_cos();
+        for (px, py) in [
+            (el.x, el.y),
+            (el.x + el.width, el.y),
+            (el.x + el.width, el.y + el.height),
+            (el.x, el.y + el.height),
+        ] {
+            let (dx, dy) = (px - cx, py - cy);
+            let rx = cx + dx * cos - dy * sin;
+            let ry = cy + dx * sin + dy * cos;
+            min_x = min_x.min(rx);
+            min_y = min_y.min(ry);
+            max_x = max_x.max(rx);
+            max_y = max_y.max(ry);
         }
     }
 

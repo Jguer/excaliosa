@@ -1,8 +1,32 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Style/geometry defaults matching Excalidraw so partial or older documents
+// (which omit fields such as `index`) still deserialize.
+fn default_opacity() -> f64 {
+    100.0
+}
+fn default_stroke_width() -> f64 {
+    1.0
+}
+fn default_roughness() -> f64 {
+    1.0
+}
+fn default_stroke_color() -> String {
+    "#1e1e1e".to_string()
+}
+fn default_transparent() -> String {
+    "transparent".to_string()
+}
+fn default_fill_style() -> String {
+    "hachure".to_string()
+}
+fn default_stroke_style() -> String {
+    "solid".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct ExcalidrawElement {
     pub id: String,
     #[serde(rename = "type")]
@@ -49,14 +73,64 @@ pub struct ExcalidrawElement {
     pub last_committed_point: Option<Vec<f64>>,
     pub elbowed: Option<bool>,
     // Image element fields (type="image")
-    #[serde(default)]
     pub file_id: Option<String>,
-    #[serde(default)]
     pub scale: Option<Vec<f64>>,
-    #[serde(default)]
     pub crop: Option<serde_json::Value>,
-    #[serde(default)]
     pub version: Option<i32>,
+}
+
+impl Default for ExcalidrawElement {
+    fn default() -> Self {
+        ExcalidrawElement {
+            id: String::new(),
+            element_type: String::new(),
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            angle: 0.0,
+            stroke_color: default_stroke_color(),
+            background_color: default_transparent(),
+            fill_style: default_fill_style(),
+            stroke_width: default_stroke_width(),
+            stroke_style: default_stroke_style(),
+            roughness: default_roughness(),
+            opacity: default_opacity(),
+            group_ids: Vec::new(),
+            frame_id: None,
+            index: String::new(),
+            roundness: None,
+            seed: 0,
+            version_nonce: None,
+            is_deleted: false,
+            bound_elements: None,
+            updated: 0,
+            link: None,
+            locked: false,
+            text: None,
+            font_size: None,
+            font_family: None,
+            text_align: None,
+            vertical_align: None,
+            container_id: None,
+            original_text: None,
+            line_height: None,
+            baseline: None,
+            start_binding: None,
+            end_binding: None,
+            start_arrow_type: None,
+            end_arrow_type: None,
+            start_arrowhead: None,
+            end_arrowhead: None,
+            points: None,
+            last_committed_point: None,
+            elbowed: None,
+            file_id: None,
+            scale: None,
+            crop: None,
+            version: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

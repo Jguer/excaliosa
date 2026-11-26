@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use excaliosa::{color_utils::parse_color_result, convert_svg_to_png, generate_svg, render_to_png};
+use excaliosa::{color_utils::parse_color_result, generate_svg, render_to_png};
 use std::fs;
 use std::path::PathBuf;
 
@@ -16,10 +16,6 @@ struct Args {
     /// Use .svg extension to export as SVG, .png for PNG
     #[arg(short, long, value_name = "FILE")]
     output: Option<PathBuf>,
-
-    /// Use legacy SVG renderer instead of rough_tiny_skia (default is rough_tiny_skia)
-    #[arg(long)]
-    legacy: bool,
 
     /// Background color hex (e.g. #RRGGBB or #RRGGBBAA). Use "transparent" for full transparency
     #[arg(short = 'b', long = "background", value_name = "HEX")] 
@@ -84,18 +80,9 @@ fn main() -> Result<()> {
             );
         }
         _ => {
-            // Convert to PNG
-            if args.legacy {
-                // Legacy SVG + resvg approach
-                // Avoid double background: rasterizer will fill background; keep SVG transparent
-                let svg_content = generate_svg(&excalidraw_data, None);
-                convert_svg_to_png(&svg_content, &output_path, bg_rgba, args.quality, args.dpi)
-                    .with_context(|| format!("Failed to convert to PNG: {output_path:?}"))?;
-            } else {
-                // Use rough_tiny_skia renderer (direct PNG output)
-                render_to_png(&excalidraw_data, &output_path, bg_rgba, args.quality, args.dpi)
-                    .with_context(|| format!("Failed to render PNG: {output_path:?}"))?;
-            }
+            // Rasterize directly to PNG via the Skia backend.
+            render_to_png(&excalidraw_data, &output_path, bg_rgba, args.quality, args.dpi)
+                .with_context(|| format!("Failed to render PNG: {output_path:?}"))?;
 
             println!(
                 "Successfully converted {} to {}",

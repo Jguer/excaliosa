@@ -74,20 +74,12 @@ pub(crate) fn build_scene_with_labels(
         .collect();
     let mut unsupported = 0;
 
-    let sticky_labels: HashMap<usize, usize> = data
-        .elements
-        .iter()
-        .enumerate()
-        .filter(|(_, el)| !el.is_deleted && el.element_type == "stickynote")
-        .filter_map(|(index, _)| {
-            sticky_bound_text(index, &data.elements).map(|text_index| (index, text_index))
-        })
-        .collect();
     let bound_text: HashSet<usize> = arrow_labels
         .values()
         .map(|label| label.text_index)
         .collect();
-    let sticky_text_indices: HashSet<usize> = sticky_labels.values().copied().collect();
+    let shape_labels = resolve_shape_labels(&data.elements, &bound_text);
+    let shape_text_indices: HashSet<usize> = shape_labels.values().copied().collect();
     let mut drawables = Vec::new();
     let mut embeds = Vec::new();
     let mut image_assets = ImageAssets::default();
@@ -106,7 +98,7 @@ pub(crate) fn build_scene_with_labels(
             apply_containing_frame(&mut built, el, &elements);
             embeds.extend(built);
         } else if el.element_type == "stickynote" {
-            let text = sticky_labels
+            let text = shape_labels
                 .get(&index)
                 .map(|text_index| &data.elements[*text_index]);
             let mut built = build_sticky_note(el, text);
@@ -124,7 +116,7 @@ pub(crate) fn build_scene_with_labels(
                 apply_containing_frame(std::slice::from_mut(&mut label), text, &elements);
                 drawables.push(label);
             }
-        } else if !sticky_text_indices.contains(&index)
+        } else if !shape_text_indices.contains(&index)
             && !bound_text.contains(&index)
             && let Some(mut drawable) = build_element(
                 &generator,
@@ -167,6 +159,19 @@ pub(crate) fn build_scene_with_labels(
             } else {
                 apply_containing_frame(std::slice::from_mut(&mut drawable), el, &elements);
                 drawables.push(drawable);
+            }
+            if let Some(text_index) = shape_labels.get(&index)
+                && let Some(mut label) = build_element(
+                    &generator,
+                    &data.elements[*text_index],
+                    &data.files,
+                    cap_background,
+                    &mut image_assets,
+                )
+            {
+                let text = &data.elements[*text_index];
+                apply_containing_frame(std::slice::from_mut(&mut label), text, &elements);
+                drawables.push(label);
             }
         }
     }
@@ -225,32 +230,75 @@ fn build_element(
     Some(drawable)
 }
 
-fn sticky_bound_text(note_index: usize, elements: &[ExcalidrawElement]) -> Option<usize> {
-    let note = &elements[note_index];
-    let mut bindings = note
-        .bound_elements
-        .as_ref()?
-        .iter()
-        .filter(|bound| bound.element_type == "text");
-    let text_id = bindings.next()?.id.as_str();
-    if bindings.next().is_some()
-        || elements
-            .iter()
-            .filter(|el| !el.is_deleted && el.element_type == "stickynote" && el.id == note.id)
-            .count()
-            != 1
-    {
-        return None;
+fn resolve_shape_labels(
+    elements: &[ExcalidrawElement],
+    arrow_text: &HashSet<usize>,
+) -> HashMap<usize, usize> {
+    let mut live_ids = HashMap::new();
+    let mut text_claims: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (index, element) in elements.iter().enumerate() {
+        if element.is_deleted {
+            continue;
+        }
+        if !element.id.is_empty() {
+            live_ids
+                .entry(element.id.as_str())
+                .and_modify(|found| *found = None)
+                .or_insert(Some(index));
+        }
+        if matches!(
+            element.element_type.as_str(),
+            "rectangle" | "ellipse" | "diamond" | "stickynote" | "arrow"
+        ) {
+            for bound in element
+                .bound_elements
+                .iter()
+                .flatten()
+                .filter(|bound| bound.element_type == "text")
+            {
+                text_claims.entry(&bound.id).or_default().push(index);
+            }
+        }
     }
 
-    let mut matches = elements.iter().enumerate().filter(|(_, text)| {
-        !text.is_deleted
+    let mut labels = HashMap::new();
+    for (owner_index, owner) in elements.iter().enumerate() {
+        if owner.is_deleted
+            || !matches!(
+                owner.element_type.as_str(),
+                "rectangle" | "ellipse" | "diamond" | "stickynote"
+            )
+            || live_ids.get(owner.id.as_str()) != Some(&Some(owner_index))
+        {
+            continue;
+        }
+        let mut bindings = owner
+            .bound_elements
+            .iter()
+            .flatten()
+            .filter(|bound| bound.element_type == "text");
+        let Some(binding) = bindings.next() else {
+            continue;
+        };
+        if bindings.next().is_some()
+            || text_claims
+                .get(binding.id.as_str())
+                .is_none_or(|claims| claims.as_slice() != [owner_index])
+        {
+            continue;
+        }
+        let Some(text_index) = live_ids.get(binding.id.as_str()).and_then(|index| *index) else {
+            continue;
+        };
+        let text = &elements[text_index];
+        if !arrow_text.contains(&text_index)
             && text.element_type == "text"
-            && text.id == text_id
-            && text.container_id.as_deref() == Some(note.id.as_str())
-    });
-    let (text_index, _) = matches.next()?;
-    matches.next().is_none().then_some(text_index)
+            && text.container_id.as_deref() == Some(owner.id.as_str())
+        {
+            labels.insert(owner_index, text_index);
+        }
+    }
+    labels
 }
 
 pub(super) fn drawable(el: &ExcalidrawElement, primitive: Primitive) -> Drawable {

@@ -37,8 +37,8 @@ use super::freedraw;
 use super::linear_geometry::{LinearMeasurements, generated_cap_direction, measure_linear};
 use super::static_elements::{build_embed, build_sticky_note};
 use super::{
-    Drawable, ImageAsset, ImageCrop, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene,
-    TextAlign, TextPrimitive,
+    Drawable, ImageAsset, ImageCrop, ImagePrimitive, PaintedPath, PathCompositing, PathOp,
+    Primitive, Rgba, Scene, TextAlign, TextPrimitive,
 };
 
 /// Default font size used when an element omits one (Excalidraw "medium").
@@ -331,6 +331,14 @@ pub(super) fn drawable(el: &ExcalidrawElement, primitive: Primitive) -> Drawable
         center,
         frame_clip: None,
         frame_opacity: None,
+        path_compositing: if matches!(
+            el.element_type.as_str(),
+            "rectangle" | "ellipse" | "diamond" | "line" | "arrow"
+        ) {
+            PathCompositing::PerPaint
+        } else {
+            PathCompositing::Group
+        },
     }
 }
 

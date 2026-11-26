@@ -47,11 +47,15 @@ fn safe_links_wrap_their_visible_marks_without_changing_paint_state() {
 
     let https = anchor_body(&svg, "HtTpS://Example.COM/search?a=1&amp;b=2");
     assert!(
-        https.starts_with("<g opacity=\"0.6500\" transform=\"rotate(10 90 55)\">"),
+        https.starts_with("<g transform=\"rotate(10 90 55)\">"),
         "{https}"
     );
     assert!(https.ends_with("</g>"), "{https}");
-    assert!(https.contains("stroke=\"#112233\""), "{https}");
+    assert!(
+        https.contains("stroke=\"#112233\" stroke-width=\"2\" stroke-opacity=\"0.6500\""),
+        "{https}"
+    );
+    assert!(https.contains("fill-opacity=\"0.6500\""), "{https}");
     assert!(!https.contains("stroke=\"#2244dd\""), "{https}");
 
     let mailto = anchor_body(&svg, "MAILTO:user+export@example.com");
@@ -126,7 +130,9 @@ fn zero_opacity_marks_keep_their_artwork_without_anchors() {
 
     let actual = generate_svg(&linked, None);
     assert_eq!(actual, generate_svg(&unlinked, None));
-    assert!(actual.contains("<g opacity=\"0.0000\">"), "{actual}");
+    assert!(actual.contains("fill-opacity=\"0.0000\""), "{actual}");
+    assert!(actual.contains("stroke-opacity=\"0.0000\""), "{actual}");
+    assert!(!actual.contains("<g opacity="), "{actual}");
 }
 
 #[test]

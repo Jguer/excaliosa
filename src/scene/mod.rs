@@ -137,6 +137,12 @@ pub enum Primitive {
     Image(ImagePrimitive),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathCompositing {
+    Group,
+    PerPaint,
+}
+
 /// A containing frame's clip in scene coordinates, before its own rotation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameClip {
@@ -162,6 +168,7 @@ pub struct Drawable {
     pub frame_clip: Option<FrameClip>,
     /// Opacity inherited from a containing frame, before combining with the element's opacity.
     pub frame_opacity: Option<f64>,
+    pub path_compositing: PathCompositing,
 }
 
 pub struct Scene {

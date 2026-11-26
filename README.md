@@ -4,9 +4,9 @@
   <p><strong>Convert Excalidraw JSON diagrams to PNG or SVG from the command line.</strong></p>
   <p><em>It's ExcaliOsa not ExcalioSAR.</em></p>
   <p>
-    <a href="https://github.com/Jguer/excaliosa/actions/workflows/rust.yml"><img alt="CI" src="https://github.com/Jguer/excaliosa/actions/workflows/rust.yml/badge.svg" /></a>
+    <a href="https://github.com/Jguer/excaliosa/actions/workflows/rust.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Jguer/excaliosa/rust.yml?branch=main" /></a>
     <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
-    <a href="https://ghcr.io/jguer/excaliosa"><img alt="GHCR container" src="https://img.shields.io/badge/GHCR-excaliosa-2496ED?logo=docker&amp;logoColor=white" /></a>
+    <a href="https://github.com/Jguer/excaliosa/pkgs/container/excaliosa"><img alt="GHCR container" src="https://img.shields.io/badge/GHCR-excaliosa-2496ED?logo=docker&amp;logoColor=white" /></a>
     <a href="Cargo.toml"><img alt="Rust edition 2024" src="https://img.shields.io/badge/Rust-2024%20edition-000000?logo=rust" /></a>
   </p>
 </div>
@@ -33,14 +33,14 @@ Excaliosa is a Rust CLI for turning Excalidraw JSON into PNG or SVG without a br
 | Lines and arrows | Straight multi-point paths, curved paths, rounded elbow arrows, and closed-line fills. Caps follow the generated shaft, including curved and elbow geometry. |
 | Arrowheads | `arrow`, `bar`, `circle`, `circle_outline`, `triangle`, `triangle_outline`, `diamond`, and `diamond_outline`, with legacy `dot` support. |
 | Cardinality markers | `cardinality_one`, `cardinality_many`, `cardinality_one_or_many`, `cardinality_exactly_one`, `cardinality_zero_or_one`, and `cardinality_zero_or_many`, plus supported legacy crowfoot names. |
-| Arrow labels | Saved or fractional label positions on straight, curved, and elbow arrows. A padded mask keeps the arrow shaft out of the label area. |
+| Arrow labels | Resolved labels use the arrow's middle point or segment, or a saved path fraction. Unresolved labels keep their saved coordinates as ordinary text. A padded mask keeps the arrow shaft out of the label area. |
 | Freedraw | Constant- and variable-width ink, recorded or simulated pressure, streamline smoothing, dots, reversals, and closed-loop fills. The outline algorithm is an approximation. |
 | Text | Bundled fonts, multiline text, explicit line heights, left/center/right alignment, and preserved whitespace and logical text direction in SVG. |
-| Frames | Frame and Magicframe names and outlines, inherited opacity, and clipping for contained non-arrow content. |
+| Frames | Frame and Magicframe names and outlines, inherited opacity, and clipping for direct frame members except arrows, arrow-bound text, and nested frames. |
 | Sticky notes | Seeded paper jitter, rounded or lifted corners, an edge shadow, saved bound text, and a deterministic UTC creation-date footer when space permits. |
 | Embed placeholders | Static styled rectangles for `iframe` and `embeddable` elements, with escaped, bounded single-line labels. Remote and active content is never loaded. |
 | Images | Embedded raster data URLs with rotation, horizontal/vertical flipping, validated cropping, rounded corners, and shared assets for repeated images. Format support differs by backend; see [Output formats](#output-formats). |
-| SVG links | Validated HTTP(S), `mailto:`, and same-document fragment links around visible SVG elements. Unsafe or malformed links are omitted. |
+| SVG links | Validated HTTP(S), `mailto:`, and same-document fragment links around supported visible SVG elements. Frames, sticky-note paper, and embed placeholders do not carry links. Unsafe or malformed links are omitted. |
 | Named colors | Case-insensitive CSS/SVG named colors in scene paints, along with hexadecimal colors and alpha. The CLI background option intentionally accepts only full hexadecimal values or `transparent`. |
 | Legacy-file import | Legacy `draw` elements, incomplete linear point data, legacy text font shorthand and line heights, legacy arrowhead fields, and omitted paint defaults. |
 
@@ -48,7 +48,7 @@ Excaliosa is a Rust CLI for turning Excalidraw JSON into PNG or SVG without a br
 
 ### Build from source
 
-A Rust toolchain with Rust 2024 edition support is required. `Cargo.toml` selects edition 2024 and does not declare a separate `rust-version`/MSRV.
+Use a current stable Rust toolchain. `Cargo.toml` selects edition 2024 and does not declare a separate `rust-version`/MSRV.
 
 ```bash
 git clone https://github.com/Jguer/excaliosa.git
@@ -86,7 +86,7 @@ docker run --rm \
 
 On SELinux systems, add a volume relabel flag, for example `-v "$PWD:/work:z"`.
 
-The `Dockerfile` builds the Rust binary in Alpine and runs it as an unprivileged user. The Docker workflow publishes `linux/amd64` and `linux/arm64` images for version tags or manual runs after the Rust workflow passes.
+The `Dockerfile` builds the Rust binary in Alpine and runs it as an unprivileged user. The Docker workflow publishes `linux/amd64` and `linux/arm64` images for version tags or manual runs after the Rust workflow passes. The `latest` tag is updated only on default-branch runs; version-tag runs publish version and short-SHA tags.
 
 ## Usage
 
@@ -128,10 +128,10 @@ excaliosa examples/logo.json --quality 90 -o logo-compressed.png
 | `-o, --output <FILE>` | Input path with `.png` extension | Destination path. `.svg` selects SVG; all other extensions select PNG. |
 | `-b, --background <HEX>` | Format-specific; see below | `#RRGGBB`, `#RRGGBBAA`, or `transparent`. Alpha is supported in both formats. |
 | `-q, --quality <0-100>` | `75` | PNG compression only: 0-25 fast, 26-75 balanced, 76-100 best. Higher values favor smaller files over encoding speed. |
-| `--dpi <DPI>` | Unscaled | Positive PNG DPI, assuming 96 DPI source geometry. `--dpi 48` halves dimensions; SVG ignores this option. |
+| `--dpi <DPI>` | Unscaled | Positive DPI, assuming 96 DPI source geometry. PNG dimensions are rounded up after scaling, so `--dpi 48` halves dimensions before rounding up. Valid values do not affect SVG. |
 | `-h, --help` | | Print CLI help. |
 
-Existing destinations are replaced without prompting, but only after a successful render and encode. A temporary file is created beside the destination; an output symlink is replaced rather than followed. The input file and symbolic or hard links to it cannot be used as the destination.
+Existing destinations resolving to non-regular files are rejected. On a successful export, the destination entry is replaced rather than written through; an output symlink to a regular file is replaced rather than followed. A temporary file is created beside the destination. The input file and symbolic or hard links to it cannot be used as the destination.
 
 <details>
 <summary>Full CLI help</summary>
@@ -166,10 +166,10 @@ Both formats consume the same lowered scene, so shape geometry, arrowheads, labe
 | Embedded fonts | Excalifont, Cascadia Code, and Comic Shanns are embedded once per used family as complete base64 TTFs. Liberation Sans is named but not embedded. | No external font lookup or font embedding is needed; glyphs are rasterized from the bundled fonts. |
 | Text behavior | Preserves whitespace, line breaks, alignment, direction, and logical anchors. Complex shaping is left to the SVG viewer. | Simple per-character layout with bundled-font fallback; no complex shaping or bidirectional reordering. |
 | Images | Accepts embedded PNG, JPEG/JPG, GIF, and WebP data URLs; SVG data URLs are rejected. | Requires base64-encoded, static PNG data. Missing, malformed, unsupported, and animated images fail the export. |
-| Links | Safe saved links become SVG anchors. | Link metadata does not affect pixels. |
+| Links | Accepted saved links on supported visible elements become SVG anchors. Frames, sticky-note paper, and embed placeholders do not carry links. | No hyperlinks. Link metadata otherwise does not affect pixels, but a web embed's URL can appear in its placeholder label. |
 | Scaling | ViewBox in scene units. `--dpi` and `--quality` do not apply. | `--dpi` scales from 96 DPI; `--quality` controls compression. |
 
-PNG output and each embedded PNG are limited to **8,192 pixels per axis** and **16,777,216 pixels total**. Embedded PNGs also have a 24 MiB encoded-payload limit and an 8 MiB best-effort decoder workspace budget. These checks reject oversized images before allocating the full output buffer.
+For PNG export, the output canvas and each embedded PNG are limited to **8,192 pixels per axis** and **16,777,216 pixels total**. The output canvas size is checked before canvas allocation. Embedded PNGs also have a 24 MiB encoded-payload limit and an 8 MiB best-effort decoder workspace budget; their decoded-pixel size is checked before allocating that image's pixel buffer. SVG does not run the PNG decoder or enforce these limits on embedded images.
 
 ## Fonts
 
@@ -223,7 +223,7 @@ cargo clippy -- -D warnings
 
 Unit and integration tests cover import compatibility, geometry, arrowheads and cardinality, labels, frames, freedraw, static elements, image cropping and reuse, named colors, SVG links, fonts, and output safety. Focused Excalidraw JSON documents live in [`tests/fixtures/`](tests/fixtures/); additional sample diagrams are in [`examples/`](examples/).
 
-The Rust workflow builds, runs all tests, and runs the CLI smoke test for pushes to `main` and pull requests. Keep changes formatted and warning-free with `make fmt` and `make lint`.
+The Rust workflow builds, runs all tests, and runs the CLI smoke test for pushes to `main` and pull requests targeting `main`. Keep changes formatted and warning-free with `make fmt` and `make lint`.
 
 ## Contributing
 

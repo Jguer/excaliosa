@@ -128,18 +128,17 @@ mod output_tests {
     }
 }
 
-/// Calculate the viewbox that encompasses all non-deleted elements
+pub(crate) fn contributes_bounds(element_type: &str) -> bool {
+    // Frames still reserve space even though we don't paint their borders.
+    matches!(
+        element_type,
+        "frame" | "magicframe" | "rectangle" | "ellipse" | "diamond" | "line" | "arrow" | "text" | "image"
+    )
+}
+
+/// Calculate the viewbox for non-deleted supported elements and frames.
 pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
     const PADDING: f64 = 40.0;
-
-    if elements.is_empty() {
-        return ViewBox {
-            min_x: 0.0,
-            min_y: 0.0,
-            width: 800.0,
-            height: 600.0,
-        };
-    }
 
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
@@ -147,19 +146,14 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
     let mut max_y = f64::NEG_INFINITY;
 
     for el in elements {
-        if el.is_deleted {
+        if el.is_deleted || !contributes_bounds(&el.element_type) {
             continue;
         }
-        // Bound the element's rotated axis-aligned box. `angle` is in radians;
-        // for angle 0 this reduces to the plain (x, y, x+w, y+h) extent.
-        let (cx, cy) = (el.x + el.width / 2.0, el.y + el.height / 2.0);
+        // Linear points can extend left or above their origin. Keep the same
+        // stored-box rotation pivot as the renderer, regardless of the bounds.
+        let (cx, cy) = crate::math_utils::calculate_center(el.x, el.y, el.width, el.height);
         let (sin, cos) = el.angle.sin_cos();
-        for (px, py) in [
-            (el.x, el.y),
-            (el.x + el.width, el.y),
-            (el.x + el.width, el.y + el.height),
-            (el.x, el.y + el.height),
-        ] {
+        let mut include = |px: f64, py: f64| {
             let (dx, dy) = (px - cx, py - cy);
             let rx = cx + dx * cos - dy * sin;
             let ry = cy + dx * sin + dy * cos;
@@ -167,7 +161,30 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
             min_y = min_y.min(ry);
             max_x = max_x.max(rx);
             max_y = max_y.max(ry);
+        };
+        match (el.element_type.as_str(), el.points.as_deref()) {
+            ("line" | "arrow", Some(points)) if !points.is_empty() => {
+                // shortcut: padding covers normal overshoot; use painted paths for exact bounds.
+                for &(x, y) in points {
+                    include(el.x + x, el.y + y);
+                }
+            }
+            _ => {
+                include(el.x, el.y);
+                include(el.x + el.width, el.y);
+                include(el.x + el.width, el.y + el.height);
+                include(el.x, el.y + el.height);
+            }
         }
+    }
+
+    if min_x == f64::INFINITY {
+        return ViewBox {
+            min_x: 0.0,
+            min_y: 0.0,
+            width: 800.0,
+            height: 600.0,
+        };
     }
 
     ViewBox {

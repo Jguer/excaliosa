@@ -55,7 +55,8 @@ where
 /// - For circles: [center_x, center_y, diameter]
 /// - For triangles/arrows: [tip_x, tip_y, side1_x, side1_y, side2_x, side2_y]
 /// - For diamonds: [tip_x, tip_y, side1_x, side1_y, opposite_x, opposite_y, side2_x, side2_y]
-/// - For crowfoot: [base_x, base_y, side1_x, side1_y, side2_x, side2_y]
+/// - For crowfoot forks: [base_x, base_y, side1_x, side1_y, side2_x, side2_y]
+/// - For crowfoot_one: [tip_x, tip_y, bar1_x, bar1_y, bar2_x, bar2_y]
 #[allow(clippy::too_many_arguments)]
 pub fn calc_arrowhead_points<T>(
     x_tail: T,
@@ -105,17 +106,12 @@ where
             let diameter = ((ys - y_tip).powi(2) + (xs - x_tip).powi(2)).sqrt() + stroke_width - T::from(2.0).unwrap();
             vec![x_tip, y_tip, diameter]
         }
-        "bar" => {
-            // Perpendicular bar
-            let angle = T::from(get_arrowhead_angle(arrowhead)).unwrap().to_radians();
-            let cos_a = angle.cos();
-            let sin_a = angle.sin();
-            let x3 = xs + (-ny * cos_a - nx * sin_a) * min_size;
-            let y3 = ys + (nx * cos_a - ny * sin_a) * min_size;
-            let x4 = xs + (-ny * cos_a + nx * sin_a) * min_size;
-            let y4 = ys + (nx * cos_a + ny * sin_a) * min_size;
-            vec![x3, y3, x4, y4]
-        }
+        "bar" => vec![
+            x_tip - ny * min_size,
+            y_tip + nx * min_size,
+            x_tip + ny * min_size,
+            y_tip - nx * min_size,
+        ],
         "arrow" => {
             // Open arrow (two lines)
             let angle = T::from(get_arrowhead_angle(arrowhead)).unwrap().to_radians();
@@ -159,11 +155,10 @@ where
             vec![xs, ys, x3, y3, x4, y4]
         }
         "crowfoot_one" => {
-            // Similar to crowfoot_many but different rendering
             let angle = T::from(get_arrowhead_angle(arrowhead)).unwrap().to_radians();
-            let (x3, y3) = rotate_point(x_tip, y_tip, xs, ys, -angle);
-            let (x4, y4) = rotate_point(x_tip, y_tip, xs, ys, angle);
-            vec![xs, ys, x3, y3, x4, y4]
+            let (x3, y3) = rotate_point(xs, ys, x_tip, y_tip, -angle);
+            let (x4, y4) = rotate_point(xs, ys, x_tip, y_tip, angle);
+            vec![x_tip, y_tip, x3, y3, x4, y4]
         }
         _ => vec![],
     }

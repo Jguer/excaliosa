@@ -43,14 +43,7 @@ pub fn render_to_png(
 ) -> Result<()> {
     ensure!(dpi != Some(0), "PNG DPI must be positive");
     let scale = dpi.map(|d| f64::from(d) / SOURCE_DPI).unwrap_or(1.0);
-    // Match build_scene's viewbox for visible elements, but request the shared
-    // empty default explicitly until calculate_viewbox handles all-deleted inputs.
-    let elements: &[_] = if data.elements.iter().all(|el| el.is_deleted) {
-        &[]
-    } else {
-        &data.elements
-    };
-    let vb = calculate_viewbox(elements);
+    let vb = calculate_viewbox(&data.elements);
     let (width, height) = raster_size(vb.width * scale, vb.height * scale)
         .context("Invalid PNG output dimensions")?;
 

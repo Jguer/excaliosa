@@ -277,12 +277,13 @@ fn conflicting_dangling_deleted_and_empty_bindings_stay_safe() {
         assert_eq!(scene.drawables.len(), if blank.is_empty() { 1 } else { 2 });
     }
 
-    let mut unrenderable = arrow("unrenderable", 0.0, 300.0, vec![]);
-    let orphaned = label("orphaned", Some("unrenderable"), 800.0, 800.0);
-    bind(&mut unrenderable, &orphaned);
-    let scene = scene_for(vec![unrenderable, orphaned]);
-    assert_eq!(scene.drawables.len(), 1);
-    assert_eq!(text_primitive(&scene, "LABEL").x, 800.0);
+    let mut recovered = arrow("recovered", 0.0, 300.0, vec![]);
+    recovered.width = 100.0;
+    let recovered_label = label("recovered-label", Some("recovered"), 800.0, 800.0);
+    bind(&mut recovered, &recovered_label);
+    let scene = scene_for(vec![recovered, recovered_label]);
+    assert_eq!(scene.drawables.len(), 2);
+    assert_eq!(text_primitive(&scene, "LABEL").x, 30.0);
 }
 
 #[test]

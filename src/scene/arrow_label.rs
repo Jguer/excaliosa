@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::math_utils::{CubicBezierSegment, calculate_center, catmull_rom_cubics};
-use crate::models::ExcalidrawElement;
+use crate::models::{ExcalidrawElement, has_renderable_elbow_geometry};
 
 use super::LabelGap;
 
@@ -124,6 +124,9 @@ pub(crate) fn resolve_arrow_labels(
 }
 
 fn label_center(arrow: &ExcalidrawElement, label_position: Option<f64>) -> Option<(f64, f64)> {
+    if arrow.elbowed.unwrap_or(false) && !has_renderable_elbow_geometry(arrow) {
+        return None;
+    }
     let points = arrow.points.as_ref()?;
     if points.len() < 2 {
         return None;

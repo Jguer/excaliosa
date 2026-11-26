@@ -1,0 +1,101 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "excaliosa-arrowhead-cardinality-test",
+  "elements": [
+    {
+      "id": "one",
+      "type": "arrow",
+      "x": 60,
+      "y": 50,
+      "width": 300,
+      "height": 0,
+      "points": [[0, 0], [300, 0]],
+      "startArrowhead": "cardinality_one",
+      "endArrowhead": "cardinality_one",
+      "strokeColor": "#1e1e1e",
+      "strokeWidth": 3,
+      "roughness": 0,
+      "seed": 11
+    },
+    {
+      "id": "many",
+      "type": "arrow",
+      "x": 60,
+      "y": 120,
+      "width": 300,
+      "height": 0,
+      "points": [[0, 0], [300, 0]],
+      "startArrowhead": "cardinality_many",
+      "endArrowhead": "cardinality_many",
+      "strokeColor": "#1971c2",
+      "strokeWidth": 3,
+      "roughness": 0,
+      "seed": 12
+    },
+    {
+      "id": "one-or-many",
+      "type": "arrow",
+      "x": 60,
+      "y": 190,
+      "width": 300,
+      "height": 0,
+      "points": [[0, 0], [300, 0]],
+      "startArrowhead": "cardinality_one_or_many",
+      "endArrowhead": "cardinality_one_or_many",
+      "strokeColor": "#2f9e44",
+      "strokeWidth": 3,
+      "roughness": 0,
+      "seed": 13
+    },
+    {
+      "id": "exactly-one",
+      "type": "arrow",
+      "x": 60,
+      "y": 260,
+      "width": 300,
+      "height": 0,
+      "points": [[0, 0], [300, 0]],
+      "startArrowhead": "cardinality_exactly_one",
+      "endArrowhead": "cardinality_exactly_one",
+      "strokeColor": "#e8590c",
+      "strokeWidth": 3,
+      "roughness": 0,
+      "seed": 14
+    },
+    {
+      "id": "zero-or-one",
+      "type": "arrow",
+      "x": 60,
+      "y": 330,
+      "width": 300,
+      "height": 0,
+      "points": [[0, 0], [300, 0]],
+      "startArrowhead": "cardinality_zero_or_one",
+      "endArrowhead": "cardinality_zero_or_one",
+      "strokeColor": "#9c36b5",
+      "strokeWidth": 3,
+      "roughness": 0,
+      "seed": 15
+    },
+    {
+      "id": "zero-or-many",
+      "type": "arrow",
+      "x": 60,
+      "y": 400,
+      "width": 300,
+      "height": 0,
+      "points": [[0, 0], [300, 0]],
+      "startArrowhead": "cardinality_zero_or_many",
+      "endArrowhead": "cardinality_zero_or_many",
+      "strokeColor": "#e03131",
+      "strokeWidth": 3,
+      "roughness": 0,
+      "seed": 16
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff"
+  },
+  "files": {}
+}

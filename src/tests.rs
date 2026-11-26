@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod renderer_tests {
-    use crate::models::{ExcalidrawData, ExcalidrawElement};
+    use crate::models::{ArrowheadField, ExcalidrawData, ExcalidrawElement};
     use crate::backend::svg::generate_svg;
     use crate::scene::Primitive;
     use crate::utils::calculate_viewbox;
@@ -287,15 +287,14 @@ mod renderer_tests {
     }
 
     #[test]
-    fn test_arrowheads_are_solid_even_when_dotted() {
-        // Create an arrow with dotted stroke and arrowheads
+    fn test_dotted_line_caps_use_a_tighter_dash() {
         let mut element = create_test_element("arrow1", "arrow", 0.0, 0.0, 0.0, 0.0);
         element.stroke_color = "#000000".to_string();
         element.stroke_style = "dotted".to_string();
         element.stroke_width = 2.0;
         element.points = Some(vec![(0.0, 0.0), (100.0, 0.0)]);
-        element.start_arrowhead = Some("arrow".to_string());
-        element.end_arrowhead = Some("arrow".to_string());
+        element.start_arrowhead = ArrowheadField::Named("arrow".to_string());
+        element.end_arrowhead = ArrowheadField::Named("arrow".to_string());
 
         let data = ExcalidrawData {
             data_type: "excalidraw".to_string(),
@@ -309,10 +308,8 @@ mod renderer_tests {
 
         let svg = generate_svg(&data, None);
 
-        // There should be exactly one stroke-dasharray attribute (on the shaft),
-        // but NOT on arrowheads which should remain solid.
-        let dasharray_count = svg.matches("stroke-dasharray=\"").count();
-        assert_eq!(dasharray_count, 1, "Only the shaft should be dashed, arrowheads must be solid");
+        assert_eq!(svg.matches("stroke-dasharray=\"1.5,8\"").count(), 1);
+        assert_eq!(svg.matches("stroke-dasharray=\"1.5,6\"").count(), 4);
     }
 
     #[test]
@@ -389,6 +386,7 @@ mod renderer_tests {
 
         let mut plain = create_test_element("b", "arrow", 0.0, 0.0, 100.0, 0.0);
         plain.points = Some(vec![(0.0, 0.0), (100.0, 0.0)]);
+        plain.end_arrowhead = ArrowheadField::Null;
 
         let count = |el: ExcalidrawElement| {
             let scene = crate::build_scene(&wrap(vec![el]), None);

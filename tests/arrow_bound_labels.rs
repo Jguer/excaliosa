@@ -1,6 +1,6 @@
 use std::f64::consts::FRAC_PI_2;
 
-use excaliosa::models::{BoundElement, RoundnessType};
+use excaliosa::models::{ArrowheadField, BoundElement, RoundnessType};
 use excaliosa::scene::{LabelGap, Primitive, Rgba, TextPrimitive};
 use excaliosa::{ExcalidrawData, ExcalidrawElement, build_scene, generate_svg, render_to_png};
 
@@ -388,6 +388,25 @@ fn framed_linked_arrow_and_label_stay_unclipped_with_their_mask() {
 
     let outside = render_pixel(elements, (0, 0, 0, 0), (190.0, 120.0));
     assert!(outside[3] > 0, "frame must not clip the arrow");
+}
+
+#[test]
+fn label_gap_masks_caps_as_well_as_the_shaft() {
+    let mut arrow = arrow("capped", 50.0, 100.0, vec![(0.0, 0.0), (200.0, 0.0)]);
+    arrow.end_arrowhead = ArrowheadField::Named("bar".into());
+    let cap_point = (250.0, 114.0);
+    assert!(
+        render_pixel(vec![arrow.clone()], (0, 0, 0, 0), cap_point)[3] > 0,
+        "the test point must intersect the unmasked cap"
+    );
+
+    let mut text = label("cap-label", Some("capped"), 1_000.0, 1_000.0);
+    text.label_position = Some(1.0);
+    bind(&mut arrow, &text);
+    assert_eq!(
+        render_pixel(vec![arrow, text], (0, 0, 0, 0), cap_point),
+        [0, 0, 0, 0]
+    );
 }
 
 #[test]

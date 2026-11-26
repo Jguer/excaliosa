@@ -110,7 +110,9 @@ fn build_element(
         _ => return None,
     };
 
-    Some(drawable(el, primitive))
+    let mut drawable = drawable(el, primitive);
+    drawable.link = el.link.clone();
+    Some(drawable)
 }
 
 fn sticky_bound_text(note_index: usize, elements: &[ExcalidrawElement]) -> Option<usize> {
@@ -151,7 +153,7 @@ pub(super) fn drawable(el: &ExcalidrawElement, primitive: Primitive) -> Drawable
     // Excalidraw stores angles in radians; backends rotate in degrees.
     Drawable {
         primitive,
-        link: el.link.clone(),
+        link: None,
         opacity: (el.opacity / 100.0).clamp(0.0, 1.0),
         rotation_deg: el.angle.to_degrees(),
         center,

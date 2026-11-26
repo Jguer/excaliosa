@@ -19,7 +19,8 @@ use crate::font_utils::normalize_newlines;
 use crate::fonts::bundled_font;
 use crate::models::ExcalidrawData;
 use crate::scene::{
-    ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign, TextPrimitive, build_scene,
+    FrameClip, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign, TextPrimitive,
+    build_scene,
 };
 use crate::utils::{calculate_viewbox, save_png_with_quality};
 
@@ -99,11 +100,22 @@ pub fn render_to_png(
             base
         };
 
+        // A temporary output-bounded mask avoids retaining a full raster per frame.
+        let mask = drawable
+            .frame_clip
+            .as_ref()
+            .and_then(|clip| build_frame_mask(width, height, base, clip));
         match &drawable.primitive {
-            Primitive::Paths(paths) => draw_paths(&mut pixmap, paths, tf, drawable.opacity),
-            Primitive::Text(text) => draw_text(&mut pixmap, text, tf, drawable.opacity),
-            Primitive::Image(image) => draw_image(&mut pixmap, image, tf, drawable.opacity)
-                .context("Failed to render embedded PNG image")?,
+            Primitive::Paths(paths) => {
+                draw_paths(&mut pixmap, paths, tf, drawable.opacity, mask.as_ref())
+            }
+            Primitive::Text(text) => {
+                draw_text(&mut pixmap, text, tf, drawable.opacity, mask.as_ref())
+            }
+            Primitive::Image(image) => {
+                draw_image(&mut pixmap, image, tf, drawable.opacity, mask.as_ref())
+                    .context("Failed to render embedded PNG image")?
+            }
         }
     }
 
@@ -115,13 +127,19 @@ pub fn render_to_png(
 // Paths
 // ---------------------------------------------------------------------------
 
-fn draw_paths(pixmap: &mut Pixmap, paths: &[PaintedPath], transform: Transform, opacity: f64) {
+fn draw_paths(
+    pixmap: &mut Pixmap,
+    paths: &[PaintedPath],
+    transform: Transform,
+    opacity: f64,
+    mask: Option<&Mask>,
+) {
     if opacity <= 0.0 {
         return;
     }
     if opacity >= 1.0 {
         for path in paths {
-            draw_painted(pixmap, path, transform);
+            draw_painted(pixmap, path, transform, mask);
         }
         return;
     }
@@ -169,7 +187,7 @@ fn draw_paths(pixmap: &mut Pixmap, paths: &[PaintedPath], transform: Transform, 
     };
     let layer_transform = transform.post_translate(-left as f32, -top as f32);
     for path in paths {
-        draw_painted(&mut layer, path, layer_transform);
+        draw_painted(&mut layer, path, layer_transform, None);
     }
     let paint = PixmapPaint {
         opacity: opacity as f32,
@@ -181,11 +199,16 @@ fn draw_paths(pixmap: &mut Pixmap, paths: &[PaintedPath], transform: Transform, 
         layer.as_ref(),
         &paint,
         Transform::identity(),
-        None,
+        mask,
     );
 }
 
-fn draw_painted(pixmap: &mut Pixmap, pp: &PaintedPath, transform: Transform) {
+fn draw_painted(
+    pixmap: &mut Pixmap,
+    pp: &PaintedPath,
+    transform: Transform,
+    mask: Option<&Mask>,
+) {
     let Some(path) = build_path(&pp.ops) else {
         return;
     };
@@ -201,7 +224,7 @@ fn draw_painted(pixmap: &mut Pixmap, pp: &PaintedPath, transform: Transform) {
             } else {
                 FillRule::Winding
             };
-            pixmap.fill_path(&path, &paint, rule, transform, None);
+            pixmap.fill_path(&path, &paint, rule, transform, mask);
         }
     }
 
@@ -222,7 +245,7 @@ fn draw_painted(pixmap: &mut Pixmap, pp: &PaintedPath, transform: Transform) {
                 let pattern: Vec<f32> = dash.iter().map(|v| *v as f32).collect();
                 sk.dash = StrokeDash::new(pattern, 0.0);
             }
-            pixmap.stroke_path(&path, &paint, &sk, transform, None);
+            pixmap.stroke_path(&path, &paint, &sk, transform, mask);
         }
     }
 }
@@ -246,7 +269,13 @@ fn build_path(ops: &[PathOp]) -> Option<SkPath> {
 // Text (skrifa glyph outlining)
 // ---------------------------------------------------------------------------
 
-fn draw_text(pixmap: &mut Pixmap, text: &TextPrimitive, transform: Transform, opacity: f64) {
+fn draw_text(
+    pixmap: &mut Pixmap,
+    text: &TextPrimitive,
+    transform: Transform,
+    opacity: f64,
+    mask: Option<&Mask>,
+) {
     let Ok(font) = ReadFontsRef::new(bundled_font(text.font_family).bytes) else {
         return;
     };
@@ -291,7 +320,7 @@ fn draw_text(pixmap: &mut Pixmap, text: &TextPrimitive, transform: Transform, op
                     if let Some(path) =
                         glyph_path(&outline, text.font_size as f32, cursor_x, baseline_y)
                     {
-                        pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
+                        pixmap.fill_path(&path, &paint, FillRule::Winding, transform, mask);
                     }
                 }
                 if let Some(advance) = metrics.advance_width(glyph_id) {
@@ -425,6 +454,7 @@ fn draw_image(
     image: &ImagePrimitive,
     transform: Transform,
     opacity: f64,
+    mask: Option<&Mask>,
 ) -> Result<()> {
     let img = decode_embedded_png(&image.data_url)?;
     let iw = img.width() as f32;
@@ -486,8 +516,14 @@ fn draw_image(
     };
     paint.opacity = opacity.clamp(0.0, 1.0) as f32;
 
-    let clip = image_clip(pixmap, image, transform)?;
-    pixmap.draw_pixmap(0, 0, img.as_ref(), &paint, img_tf, clip.as_ref());
+    let mut clip = image_clip(pixmap, image, transform)?;
+    if let (Some(image_mask), Some(frame_mask)) = (clip.as_mut(), mask) {
+        for (image_alpha, frame_alpha) in image_mask.data_mut().iter_mut().zip(frame_mask.data()) {
+            *image_alpha = (u16::from(*image_alpha) * u16::from(*frame_alpha) / 255) as u8;
+        }
+    }
+    let clip = clip.as_ref().or(mask);
+    pixmap.draw_pixmap(0, 0, img.as_ref(), &paint, img_tf, clip);
     Ok(())
 }
 
@@ -541,6 +577,22 @@ fn image_clip(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn build_frame_mask(width: u32, height: u32, base: Transform, clip: &FrameClip) -> Option<Mask> {
+    let path = build_path(&clip.ops)?;
+    let transform = if clip.rotation_deg == 0.0 {
+        base
+    } else {
+        base.pre_concat(Transform::from_rotate_at(
+            clip.rotation_deg as f32,
+            clip.center.0 as f32,
+            clip.center.1 as f32,
+        ))
+    };
+    let mut mask = Mask::new(width, height)?;
+    mask.fill_path(&path, FillRule::Winding, true, transform);
+    Some(mask)
+}
 
 fn raster_size(width: f64, height: f64) -> Result<(u32, u32)> {
     let axis = |dim: f64| {
@@ -660,7 +712,7 @@ mod tests {
             let font = ReadFontsRef::new(bundled_font(family).bytes).unwrap();
             assert!(font.charmap().map('\u{10fffd}').is_none());
             let mut pixmap = Pixmap::new(40, 40).unwrap();
-            draw_text(&mut pixmap, &text, Transform::identity(), 1.0);
+            draw_text(&mut pixmap, &text, Transform::identity(), 1.0, None);
             assert!(
                 pixmap.pixels().iter().any(|pixel| pixel.alpha() > 0),
                 "{family}"

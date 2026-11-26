@@ -89,7 +89,7 @@ fn bounds_keep_frames_but_not_unsupported_elements() {
     let view = calculate_viewbox(&[frame, unsupported]);
     assert_eq!(
         (view.min_x, view.min_y, view.width, view.height),
-        (-40.0, -40.0, 180.0, 130.0)
+        (-40.0, -60.5, 180.0, 150.5)
     );
 }
 

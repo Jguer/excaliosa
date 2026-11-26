@@ -23,6 +23,7 @@ use crate::rect_utils::{
 use crate::stroke_utils::get_stroke_dash_array;
 use crate::utils::{calculate_viewbox, contributes_bounds};
 
+use super::frame::{build_frame, containing_frame, frame_clip};
 use super::freedraw;
 use super::static_elements::{build_embed, build_sticky_note};
 use super::{
@@ -38,6 +39,11 @@ const DEFAULT_FONT_SIZE: f64 = 20.0;
 pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
     let viewbox = calculate_viewbox(&data.elements);
     let generator = Generator::default();
+    let elements: HashMap<&str, &ExcalidrawElement> = data
+        .elements
+        .iter()
+        .map(|el| (el.id.as_str(), el))
+        .collect();
     let mut unsupported = 0;
 
     let sticky_labels: HashMap<usize, usize> = data
@@ -60,7 +66,9 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
         .filter(|(_, el)| !el.is_deleted)
     {
         unsupported += usize::from(!contributes_bounds(&el.element_type));
-        if matches!(el.element_type.as_str(), "iframe" | "embeddable") {
+        if matches!(el.element_type.as_str(), "frame" | "magicframe") {
+            drawables.extend(build_frame(el));
+        } else if matches!(el.element_type.as_str(), "iframe" | "embeddable") {
             embeds.extend(build_embed(&generator, el));
         } else if el.element_type == "stickynote" {
             let text = sticky_labels
@@ -73,8 +81,12 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
                 drawables.push(label);
             }
         } else if !sticky_text_indices.contains(&index)
-            && let Some(drawable) = build_element(&generator, el, &data.files, background)
+            && let Some(mut drawable) = build_element(&generator, el, &data.files, background)
         {
+            if let Some(frame) = containing_frame(el, &elements) {
+                drawable.opacity *= (frame.opacity / 100.0).clamp(0.0, 1.0);
+                drawable.frame_clip = frame_clip(el, frame, &elements);
+            }
             drawables.push(drawable);
         }
     }
@@ -157,6 +169,7 @@ pub(super) fn drawable(el: &ExcalidrawElement, primitive: Primitive) -> Drawable
         opacity: (el.opacity / 100.0).clamp(0.0, 1.0),
         rotation_deg: el.angle.to_degrees(),
         center,
+        frame_clip: None,
     }
 }
 

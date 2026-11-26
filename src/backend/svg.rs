@@ -24,6 +24,7 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>)
     let fonts = font_css(&scene.drawables);
 
     let mut body = String::new();
+    let mut definitions = String::new();
     if let Some(bg) = scene.background {
         if bg.3 > 0 {
             body.push_str(&format!(
@@ -39,16 +40,21 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>)
     }
 
     for (index, drawable) in scene.drawables.iter().enumerate() {
-        let rendered = render_drawable(drawable, index);
+        let rendered = render_drawable(drawable, index, &mut definitions);
         if !rendered.is_empty() {
             body.push_str(&rendered);
             body.push('\n');
         }
     }
+    let definitions = if definitions.is_empty() {
+        definitions
+    } else {
+        format!("  <defs>\n{definitions}  </defs>\n")
+    };
 
     format!(
-        "<svg viewBox=\"{} {} {} {}\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n{}{}</svg>",
-        vb.min_x, vb.min_y, vb.width, vb.height, fonts, body
+        "<svg viewBox=\"{} {} {} {}\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n{}{}{}</svg>",
+        vb.min_x, vb.min_y, vb.width, vb.height, fonts, definitions, body
     )
 }
 
@@ -76,7 +82,7 @@ fn font_css(drawables: &[Drawable]) -> String {
     css
 }
 
-fn render_drawable(drawable: &Drawable, index: usize) -> String {
+fn render_drawable(drawable: &Drawable, index: usize, definitions: &mut String) -> String {
     let inner = match &drawable.primitive {
         Primitive::Paths(paths) => paths.iter().map(path_svg).collect::<Vec<_>>().join("\n"),
         Primitive::Text(text) => text_svg(text),
@@ -103,6 +109,24 @@ fn render_drawable(drawable: &Drawable, index: usize) -> String {
         inner
     } else {
         format!("<g{attrs}>\n{inner}\n</g>")
+    };
+    let rendered = if let Some(clip) = &drawable.frame_clip {
+        let id = format!("excaliosa-frame-clip-{index}");
+        let transform = if clip.rotation_deg == 0.0 {
+            String::new()
+        } else {
+            format!(
+                " transform=\"rotate({} {} {})\"",
+                clip.rotation_deg, clip.center.0, clip.center.1
+            )
+        };
+        definitions.push_str(&format!(
+            "    <clipPath id=\"{id}\" clipPathUnits=\"userSpaceOnUse\"><path d=\"{}\"{transform}/></clipPath>\n",
+            ops_to_d(&clip.ops)
+        ));
+        format!("<g clip-path=\"url(#{id})\">\n{rendered}\n</g>")
+    } else {
+        rendered
     };
 
     if drawable.opacity == 0.0 {

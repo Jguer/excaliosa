@@ -7,6 +7,7 @@
 //! two backends render identical output.
 
 pub mod build;
+pub mod frame;
 pub(crate) mod freedraw;
 mod static_elements;
 
@@ -117,6 +118,14 @@ pub enum Primitive {
     Image(ImagePrimitive),
 }
 
+/// A containing frame's clip in scene coordinates, before its own rotation.
+#[derive(Clone, Debug)]
+pub struct FrameClip {
+    pub ops: Vec<PathOp>,
+    pub rotation_deg: f64,
+    pub center: (f64, f64),
+}
+
 /// One renderable element: a primitive plus shared element-level state
 /// (opacity and rotation about the element center).
 #[derive(Clone, Debug)]
@@ -129,6 +138,7 @@ pub struct Drawable {
     /// Rotation in degrees, applied about `center`.
     pub rotation_deg: f64,
     pub center: (f64, f64),
+    pub frame_clip: Option<FrameClip>,
 }
 
 pub struct Scene {

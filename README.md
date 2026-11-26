@@ -79,9 +79,9 @@ excaliosa path/to/diagram.json -o diagram.svg
 - -o, --output <FILE>: Output file path.
 	- Default: same as input filename with a `.png` extension.
 	- The output format is inferred from the extension: `.svg` for SVG, `.png` for PNG.
-- --legacy: Use the legacy SVG-based renderer instead of the default `rough_tiny_skia` PNG renderer.
-	- When PNG is requested and `--legacy` is set, the tool generates SVG first and then rasterizes it to PNG.
-	- Helpful if you need output that mirrors the SVG pipeline or for troubleshooting differences between renderers.
+	- Both formats use the same scene for shape geometry. SVG exports text without embedding fonts; if Excalifont, Liberation Sans, or Cascadia Code is unavailable to the viewer, it may substitute a font and change text layout. PNG renders text with bundled fonts.
+	- PNG export fails if an image has missing, malformed, or unsupported data. Use base64-encoded, non-animated PNGs for embedded images.
+	- A successful export replaces the destination entry instead of writing through a symbolic or hard link. The input file and links to it are not valid destinations.
 - -b, --background <HEX>: Background color to apply to the canvas. Accepts `#RRGGBB` or `#RRGGBBAA` (alpha supported), or the literal `transparent`.
 	- Examples: `--background "#ffffff"`, `--background "#121212cc"`, `--background transparent`.
 	- Applies to both PNG and SVG export. For SVG, a full-size background `<rect>` is inserted with `fill-opacity` derived from alpha.
@@ -90,9 +90,9 @@ excaliosa path/to/diagram.json -o diagram.svg
 	- 26-75: balanced (default: 75)
 	- 76-100: best compression (slowest)
 	- Only applies to PNG output.
-- --dpi <DPI>: Target DPI for output scaling (assumes source is 96 DPI).
+- --dpi <DPI>: Positive integer DPI for PNG output scaling (assumes source is 96 DPI).
 	- Lower values reduce output size (e.g. `--dpi 48` halves dimensions).
-	- Only applies to PNG output.
+	- PNG output is limited to 8,192 pixels per axis and 16,777,216 pixels total.
 - -h, --help: Show help and exit.
 
 ### More examples
@@ -106,9 +106,6 @@ excaliosa examples/arrows.json -o out.png
 
 # Export SVG directly
 excaliosa examples/arrows.json -o arrows.svg
-
-# Render PNG using the legacy SVG pipeline
-excaliosa examples/arrows.json --legacy -o legacy.png
 
 # Set a custom background color (opaque white)
 excaliosa examples/logo.json -b "#ffffff" -o logo_white.png

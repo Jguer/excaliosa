@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod renderer_tests {
     use crate::models::{ExcalidrawData, ExcalidrawElement};
-    use crate::renderer::generate_svg;
+    use crate::backend::svg::generate_svg;
+    use crate::scene::Primitive;
     use crate::utils::calculate_viewbox;
     use std::collections::HashMap;
     use serde_json::json;
@@ -21,7 +22,6 @@ mod renderer_tests {
             y,
             width,
             height,
-            angle: 0.0,
             stroke_color: "#000000".to_string(),
             background_color: "none".to_string(),
             fill_style: "solid".to_string(),
@@ -29,39 +29,21 @@ mod renderer_tests {
             stroke_style: "solid".to_string(),
             roughness: 0.0,
             opacity: 100.0,
-            group_ids: vec![],
-            frame_id: None,
             index: "a0".to_string(),
-            roundness: None,
-            seed: 0,
             version_nonce: Some(0),
-            is_deleted: false,
-            bound_elements: None,
-            updated: 0,
-            link: None,
-            locked: false,
-            text: None,
-            font_size: None,
-            font_family: None,
-            text_align: None,
-            vertical_align: None,
-            container_id: None,
-            original_text: None,
-            line_height: None,
-            baseline: None,
-            start_binding: None,
-            end_binding: None,
-            start_arrow_type: None,
-            end_arrow_type: None,
-            start_arrowhead: None,
-            end_arrowhead: None,
-            points: None,
-            last_committed_point: None,
-            elbowed: None,
-            file_id: None,
-            scale: None,
-            crop: None,
-            version: None,
+            ..Default::default()
+        }
+    }
+
+    fn wrap(elements: Vec<ExcalidrawElement>) -> ExcalidrawData {
+        ExcalidrawData {
+            data_type: "excalidraw".to_string(),
+            version: Some(2),
+            version_nonce: None,
+            source: Some("test".to_string()),
+            elements,
+            app_state: HashMap::new(),
+            files: HashMap::new(),
         }
     }
 
@@ -121,8 +103,8 @@ mod renderer_tests {
         assert!(svg.contains("<svg"));
         assert!(svg.contains("viewBox"));
         assert!(svg.contains("</svg>"));
-        assert!(svg.contains("<rect"));
-        assert!(svg.contains("<marker"));
+        // Shapes are emitted as rough <path> geometry (shared with the raster backend).
+        assert!(svg.contains("<path"));
     }
 
     #[test]
@@ -161,9 +143,10 @@ mod renderer_tests {
         };
 
     let svg = generate_svg(&data, None);
-        assert!(svg.contains("<rect"));
-        assert!(svg.contains("width=\"200\""));
-        assert!(svg.contains("height=\"150\""));
+        // Rectangle is now rough path geometry with both fill and stroke colors.
+        assert!(svg.contains("<path"));
+        assert!(svg.contains("stroke=\"#ff0000\""));
+        assert!(svg.contains("fill=\"#00ff00\""));
     }
 
     #[test]
@@ -180,9 +163,8 @@ mod renderer_tests {
         };
 
     let svg = generate_svg(&data, None);
-        assert!(svg.contains("<ellipse"));
-        assert!(svg.contains("cx=\"250\""));
-        assert!(svg.contains("cy=\"250\""));
+        // Ellipse is now rough path geometry rather than an <ellipse> primitive.
+        assert!(svg.contains("<path"));
     }
 
     #[test]
@@ -364,6 +346,80 @@ mod renderer_tests {
         assert!(svg.contains("href=\"data:image/png;base64,"), "SVG image should embed the data URL");
         assert!(svg.contains("width=\"100\""));
         assert!(svg.contains("height=\"50\""));
+    }
+
+    /// Regression: PNG output must be straight (non-premultiplied) alpha. A
+    /// semi-transparent fill should keep its full color channels, not be
+    /// darkened toward black as premultiplied bytes would be.
+    #[test]
+    fn test_png_alpha_is_not_premultiplied() {
+        let mut el = create_test_element("r", "rectangle", 100.0, 100.0, 200.0, 150.0);
+        el.background_color = "#ff0000".to_string();
+        el.stroke_color = "transparent".to_string();
+        el.stroke_width = 0.0;
+        el.opacity = 50.0; // half transparent -> alpha ~127
+        let data = wrap(vec![el]);
+
+        let path = std::env::temp_dir().join("excaliosa_alpha_regression.png");
+        crate::render_to_png(&data, &path, Some((0, 0, 0, 0)), 75, None).unwrap();
+
+        let decoder = png::Decoder::new(std::fs::File::open(&path).unwrap());
+        let mut reader = decoder.read_info().unwrap();
+        let mut buf = vec![0u8; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut buf).unwrap();
+        assert_eq!(info.color_type, png::ColorType::Rgba);
+
+        // A red pixel at ~50% opacity must be stored as (255, 0, 0, ~127).
+        // The premultiplied bug would instead store red ~127.
+        let found = buf.chunks_exact(4).any(|px| {
+            px[0] > 200 && px[1] < 40 && px[2] < 40 && (90..=160).contains(&px[3])
+        });
+        assert!(found, "expected a straight-alpha semi-transparent red pixel");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Regression: arrows that use the legacy `end_arrow_type` field (rather
+    /// than `end_arrowhead`) must still render an arrowhead in the shared scene.
+    #[test]
+    fn test_arrow_type_fallback_renders_head() {
+        let mut with_head = create_test_element("a", "arrow", 0.0, 0.0, 100.0, 0.0);
+        with_head.points = Some(vec![(0.0, 0.0), (100.0, 0.0)]);
+        with_head.end_arrow_type = Some("arrow".to_string());
+
+        let mut plain = create_test_element("b", "arrow", 0.0, 0.0, 100.0, 0.0);
+        plain.points = Some(vec![(0.0, 0.0), (100.0, 0.0)]);
+
+        let count = |el: ExcalidrawElement| {
+            let scene = crate::build_scene(&wrap(vec![el]), None);
+            match &scene.drawables[0].primitive {
+                Primitive::Paths(paths) => paths.len(),
+                _ => 0,
+            }
+        };
+
+        assert!(
+            count(with_head) > count(plain),
+            "end_arrow_type must add an arrowhead path"
+        );
+    }
+
+    /// The SVG and Skia backends consume the same scene, so every non-deleted,
+    /// supported element becomes exactly one drawable that both backends render.
+    #[test]
+    fn test_backends_share_scene() {
+        let rect = create_test_element("r", "rectangle", 0.0, 0.0, 50.0, 50.0);
+        let ell = create_test_element("e", "ellipse", 100.0, 0.0, 50.0, 50.0);
+        let mut deleted = create_test_element("d", "rectangle", 0.0, 200.0, 50.0, 50.0);
+        deleted.is_deleted = true;
+        let data = wrap(vec![rect, ell, deleted]);
+
+        let scene = crate::build_scene(&data, None);
+        assert_eq!(scene.drawables.len(), 2, "deleted elements are dropped once");
+
+        // Both backends emit a <path> per shape, from the same geometry.
+        let svg = generate_svg(&data, None);
+        assert!(svg.matches("<path").count() >= 2);
     }
 }
 

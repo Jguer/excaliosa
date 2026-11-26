@@ -1,0 +1,86 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "excaliosa-safe-svg-links-test",
+  "elements": [
+    {
+      "id": "safe-https",
+      "type": "rectangle",
+      "x": 20,
+      "y": 20,
+      "width": 140,
+      "height": 70,
+      "angle": 0.17453292519943295,
+      "strokeColor": "#112233",
+      "backgroundColor": "#ddeeff",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "roughness": 0,
+      "opacity": 65,
+      "seed": 101,
+      "link": "HtTpS://Example.COM/search?a=1&b=2"
+    },
+    {
+      "id": "safe-mailto",
+      "type": "text",
+      "x": 220,
+      "y": 20,
+      "width": 150,
+      "height": 30,
+      "strokeColor": "#2244dd",
+      "fontSize": 20,
+      "fontFamily": 2,
+      "lineHeight": 1.15,
+      "text": "Email exports",
+      "link": "MAILTO:user+export@example.com"
+    },
+    {
+      "id": "safe-fragment",
+      "type": "ellipse",
+      "x": 420,
+      "y": 20,
+      "width": 100,
+      "height": 80,
+      "strokeColor": "#228833",
+      "backgroundColor": "transparent",
+      "roughness": 0,
+      "seed": 102,
+      "link": "#details"
+    },
+    {
+      "id": "rejected-javascript",
+      "type": "diamond",
+      "x": 20,
+      "y": 150,
+      "width": 120,
+      "height": 80,
+      "strokeColor": "#aa2244",
+      "backgroundColor": "transparent",
+      "roughness": 0,
+      "seed": 103,
+      "link": "javascript:alert(1)"
+    },
+    {
+      "id": "deleted-safe-link",
+      "type": "rectangle",
+      "x": 200,
+      "y": 150,
+      "width": 80,
+      "height": 50,
+      "isDeleted": true,
+      "link": "https://example.com/deleted"
+    },
+    {
+      "id": "empty-text-safe-link",
+      "type": "text",
+      "x": 320,
+      "y": 150,
+      "width": 80,
+      "height": 30,
+      "text": "",
+      "link": "#empty"
+    }
+  ],
+  "appState": {},
+  "files": {}
+}

@@ -296,6 +296,7 @@ pub(crate) fn has_renderable_elbow_geometry(element: &ExcalidrawElement) -> bool
     ]
     .into_iter()
     .all(f64::is_finite)
+        && (element.angle.to_degrees() as f32).is_finite()
         && points.iter().chain([first]).all(|point| {
             point.0.is_finite()
                 && point.1.is_finite()

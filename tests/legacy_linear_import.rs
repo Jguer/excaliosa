@@ -120,6 +120,34 @@ fn recovered_records_have_visible_svg_and_png_geometry() -> Result<(), Box<dyn E
     Ok(())
 }
 
+#[test]
+fn distant_legacy_draw_keeps_its_outline_without_a_stalled_pattern_fill() {
+    let data: ExcalidrawData = serde_json::from_value(serde_json::json!({
+        "type": "excalidraw",
+        "elements": [{
+            "id": "distant-draw",
+            "type": "draw",
+            "x": 1e18,
+            "y": 0,
+            "width": 1024,
+            "height": 1024,
+            "points": [[0, 0], [1024, 0], [1024, 1024], [0, 1024], [0, 0]],
+            "backgroundColor": "#ff0000",
+            "fillStyle": "hachure",
+            "roughness": 0
+        }]
+    }))
+    .unwrap();
+
+    let scene = build_scene(&data, Some(Rgba(0, 0, 0, 0)));
+    assert_eq!(scene.drawables.len(), 1);
+    let paths = paths(&scene.drawables[0]);
+    assert_eq!(paths.len(), 1);
+    assert!(paths[0].stroke.is_some());
+    assert!(paths[0].fill.is_none());
+    assert!(generate_svg(&data, Some((0, 0, 0, 0))).contains("<path"));
+}
+
 fn translated_elbow() -> ExcalidrawData {
     serde_json::from_value(serde_json::json!({
         "type": "excalidraw",
@@ -159,6 +187,45 @@ fn elbow_guard_uses_finite_local_deltas_not_world_translation() {
         mutate(&mut data.elements[0]);
         assert!(build_scene(&data, None).drawables.is_empty());
     }
+}
+
+#[test]
+fn unrenderable_json_elbow_angle_keeps_label_at_saved_coordinates() {
+    let data: ExcalidrawData = serde_json::from_value(serde_json::json!({
+        "type": "excalidraw",
+        "elements": [
+            {
+                "id": "extreme-angle",
+                "type": "arrow",
+                "x": 0,
+                "y": 0,
+                "width": 100,
+                "height": 0,
+                "angle": 1e308,
+                "elbowed": true,
+                "boundElements": [{"id": "angle-label", "type": "text"}]
+            },
+            {
+                "id": "angle-label",
+                "type": "text",
+                "x": 300,
+                "y": 400,
+                "width": 80,
+                "height": 20,
+                "text": "ANGLE",
+                "containerId": "extreme-angle"
+            }
+        ]
+    }))
+    .unwrap();
+
+    let scene = build_scene(&data, Some(Rgba(0, 0, 0, 0)));
+    assert_eq!(scene.drawables.len(), 1);
+    assert_eq!(
+        (text_primitive(&scene).x, text_primitive(&scene).y),
+        (300.0, 400.0)
+    );
+    assert!(!generate_svg(&data, Some((0, 0, 0, 0))).contains("excaliosa-arrow-label-mask"));
 }
 
 #[test]

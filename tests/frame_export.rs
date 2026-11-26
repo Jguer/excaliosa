@@ -202,6 +202,66 @@ fn frame_title_bounds_match_multiline_and_empty_titles() {
 }
 
 #[test]
+fn freedraw_sticky_notes_and_embeds_inherit_frame_clips_and_opacity() {
+    let frame = ExcalidrawElement {
+        id: "frame".to_owned(),
+        element_type: "frame".to_owned(),
+        width: 100.0,
+        height: 100.0,
+        opacity: 50.0,
+        ..Default::default()
+    };
+    let freedraw = ExcalidrawElement {
+        id: "ink".to_owned(),
+        element_type: "freedraw".to_owned(),
+        x: -20.0,
+        y: 40.0,
+        width: 140.0,
+        points: Some(vec![(0.0, 0.0), (140.0, 0.0)]),
+        frame_id: Some("frame".to_owned()),
+        link: Some("https://example.com".to_owned()),
+        ..Default::default()
+    };
+    let note = ExcalidrawElement {
+        id: "note".to_owned(),
+        element_type: "stickynote".to_owned(),
+        x: 20.0,
+        y: 120.0,
+        width: 50.0,
+        height: 40.0,
+        frame_id: Some("frame".to_owned()),
+        ..Default::default()
+    };
+    let embed = ExcalidrawElement {
+        id: "embed".to_owned(),
+        element_type: "embeddable".to_owned(),
+        x: 80.0,
+        y: 20.0,
+        width: 40.0,
+        height: 40.0,
+        frame_id: Some("frame".to_owned()),
+        ..Default::default()
+    };
+    let data = wrap(vec![frame, freedraw, note, embed]);
+    let scene = build_scene(&data, None);
+    assert_eq!(scene.drawables.len(), 6);
+    for drawable in &scene.drawables[2..] {
+        assert!(drawable.frame_clip.is_some());
+        assert_eq!(drawable.opacity, 0.5);
+        assert_eq!(drawable.frame_opacity, Some(0.5));
+    }
+
+    let svg = generate_svg(&data, None);
+    assert_eq!(svg.matches("excaliosa-frame-clip-").count(), 8);
+    assert!(
+        svg.contains(
+            "<a href=\"https://example.com\">\n<g clip-path=\"url(#excaliosa-frame-clip-2)\">"
+        ),
+        "{svg}"
+    );
+}
+
+#[test]
 fn svg_uses_unique_user_space_clips_outside_element_transforms() {
     let svg = generate_svg(&fixture(), Some((0, 0, 0, 0)));
     assert_eq!(svg.matches("<clipPath").count(), 7);
@@ -236,13 +296,12 @@ impl Raster {
     }
 }
 
-fn render_fixture() -> (Raster, ViewBox) {
+fn render_data(data: &ExcalidrawData) -> (Raster, ViewBox) {
     std::fs::create_dir_all(".pi-cache").unwrap();
     let dir = tempfile::tempdir_in(".pi-cache").unwrap();
     let output = dir.path().join("frames.png");
-    let data = fixture();
-    let view = build_scene(&data, None).viewbox;
-    render_to_png(&data, &output, Some((0, 0, 0, 0)), 75, None).unwrap();
+    let view = build_scene(data, None).viewbox;
+    render_to_png(data, &output, Some((0, 0, 0, 0)), 75, None).unwrap();
 
     let decoder = png::Decoder::new(std::fs::File::open(output).unwrap());
     let mut reader = decoder.read_info().unwrap();
@@ -259,8 +318,54 @@ fn render_fixture() -> (Raster, ViewBox) {
 }
 
 #[test]
+fn cropped_image_clip_intersects_its_containing_frame_clip() {
+    let frame = ExcalidrawElement {
+        id: "frame".to_owned(),
+        element_type: "frame".to_owned(),
+        width: 100.0,
+        height: 100.0,
+        ..Default::default()
+    };
+    let image = ExcalidrawElement {
+        id: "cropped".to_owned(),
+        element_type: "image".to_owned(),
+        x: -50.0,
+        y: 25.0,
+        width: 100.0,
+        height: 50.0,
+        file_id: Some("blue".to_owned()),
+        frame_id: Some("frame".to_owned()),
+        crop: Some(serde_json::json!({
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 2,
+            "naturalWidth": 2,
+            "naturalHeight": 2
+        })),
+        ..Default::default()
+    };
+    let mut data = wrap(vec![frame, image]);
+    data.files = fixture().files;
+
+    let svg = generate_svg(&data, Some((0, 0, 0, 0)));
+    let frame_group = svg
+        .find("<g clip-path=\"url(#excaliosa-frame-clip-2)\">")
+        .unwrap();
+    let image_group = svg
+        .find("<g clip-path=\"url(#excaliosa-image-clip-2)\">")
+        .unwrap();
+    assert!(frame_group < image_group, "{svg}");
+
+    let (raster, view) = render_data(&data);
+    assert_eq!(raster.pixel(view, 25.0, 50.0)[3], 255);
+    assert_eq!(raster.pixel(view, 75.0, 50.0)[3], 0);
+    assert_eq!(raster.pixel(view, -25.0, 50.0)[3], 0);
+}
+
+#[test]
 fn transparent_png_clips_rounded_rotated_children_and_compounds_opacity() {
-    let (raster, view) = render_fixture();
+    let (raster, view) = render_data(&fixture());
 
     let red = raster.pixel(view, 100.0, 180.0);
     assert!(red[0] > 200 && red[1] < 20 && red[2] < 20);

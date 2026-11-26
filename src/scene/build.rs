@@ -69,26 +69,26 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
         if matches!(el.element_type.as_str(), "frame" | "magicframe") {
             drawables.extend(build_frame(el));
         } else if matches!(el.element_type.as_str(), "iframe" | "embeddable") {
-            embeds.extend(build_embed(&generator, el));
+            let mut built = build_embed(&generator, el);
+            apply_containing_frame(&mut built, el, &elements);
+            embeds.extend(built);
         } else if el.element_type == "stickynote" {
             let text = sticky_labels
                 .get(&index)
                 .map(|text_index| &data.elements[*text_index]);
-            drawables.extend(build_sticky_note(el, text));
+            let mut built = build_sticky_note(el, text);
+            apply_containing_frame(&mut built, el, &elements);
+            drawables.extend(built);
             if let Some(text) = text
-                && let Some(label) = build_element(&generator, text, &data.files, background)
+                && let Some(mut label) = build_element(&generator, text, &data.files, background)
             {
+                apply_containing_frame(std::slice::from_mut(&mut label), text, &elements);
                 drawables.push(label);
             }
         } else if !sticky_text_indices.contains(&index)
             && let Some(mut drawable) = build_element(&generator, el, &data.files, background)
         {
-            if let Some(frame) = containing_frame(el, &elements) {
-                let frame_opacity = (frame.opacity / 100.0).clamp(0.0, 1.0);
-                drawable.opacity *= frame_opacity;
-                drawable.frame_opacity = Some(frame_opacity);
-                drawable.frame_clip = frame_clip(el, frame, &elements);
-            }
+            apply_containing_frame(std::slice::from_mut(&mut drawable), el, &elements);
             drawables.push(drawable);
         }
     }
@@ -106,6 +106,23 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
         viewbox,
         background,
         drawables,
+    }
+}
+
+fn apply_containing_frame(
+    drawables: &mut [Drawable],
+    element: &ExcalidrawElement,
+    elements: &HashMap<&str, &ExcalidrawElement>,
+) {
+    let Some(frame) = containing_frame(element, elements) else {
+        return;
+    };
+    let frame_opacity = (frame.opacity / 100.0).clamp(0.0, 1.0);
+    let clip = frame_clip(element, frame, elements);
+    for drawable in drawables {
+        drawable.opacity *= frame_opacity;
+        drawable.frame_opacity = Some(frame_opacity);
+        drawable.frame_clip = clip.clone();
     }
 }
 

@@ -422,34 +422,24 @@ fn build_line(
     let should_stroke = has_stroke(el);
     let stroke = should_stroke.then(|| Rgba::from_tuple(parse_color(&el.stroke_color)));
     let dash = get_stroke_dash_array(&el.stroke_style, el.stroke_width);
-    let cap_ops = shaft
-        .sets
-        .iter()
-        .find(|set| set.op_set_type == OpSetType::Path)
-        .map(convert_ops);
     let mut out = lower_drawable(&shaft, stroke, fill, el.stroke_width, dash);
 
     // Caps share the element seed but apply their own roughness and dash rules.
     if el.element_type == "arrow" {
         if let Some(s) = stroke.filter(|stroke| stroke.3 > 0) {
-            out.extend(arrowhead_paths(
+            let shaft_ops = out.first().map(|path| path.ops.as_slice());
+            let mut caps =
+                arrowhead_paths(generator, el, points, shaft_ops, "start", s, cap_background);
+            caps.extend(arrowhead_paths(
                 generator,
                 el,
                 points,
-                cap_ops.as_deref(),
-                "start",
-                s,
-                cap_background,
-            ));
-            out.extend(arrowhead_paths(
-                generator,
-                el,
-                points,
-                cap_ops.as_deref(),
+                shaft_ops,
                 "end",
                 s,
                 cap_background,
             ));
+            out.extend(caps);
         }
     }
 

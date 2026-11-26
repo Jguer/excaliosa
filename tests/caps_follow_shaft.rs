@@ -137,8 +137,12 @@ fn assert_both_caps_follow_shaft(element: ExcalidrawElement) {
 #[test]
 fn fixed_seed_curve_attaches_both_caps_to_lowered_terminal_cubics() {
     let element = element(&fixture(), "seeded-curve");
+    let paths = paths_for(element.clone());
+    let first_tip = terminal_direction(&paths[0].ops, false).1;
+    let second_tip = terminal_direction(&paths[1].ops, false).1;
+    assert_ne!(first_tip, second_tip);
     assert!(matches!(
-        paths_for(element.clone())[0]
+        paths[0]
             .ops
             .iter()
             .find(|op| matches!(op, PathOp::Cubic(..))),

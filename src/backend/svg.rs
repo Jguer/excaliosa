@@ -234,7 +234,10 @@ fn text_svg(t: &TextPrimitive) -> String {
     let (anchor, anchor_x) = match t.align {
         TextAlign::Left => (if direction == "rtl" { "end" } else { "start" }, t.x),
         TextAlign::Center => ("middle", t.x + t.container_width / 2.0),
-        TextAlign::Right => ("end", t.x + t.container_width),
+        TextAlign::Right => (
+            if direction == "rtl" { "start" } else { "end" },
+            t.x + t.container_width,
+        ),
     };
 
     let content = normalize_newlines(&t.content);

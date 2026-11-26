@@ -74,6 +74,7 @@ fn svg_direction_uses_first_directional_character_and_logical_anchors() {
         text_element("123 שלום", "center"),
         text_element("123 שלום", "right"),
         text_element("123 English", "left"),
+        text_element("123 English", "right"),
     ]));
     let svg = generate_svg(&data, None);
     let nodes = text_nodes(&svg);
@@ -81,7 +82,7 @@ fn svg_direction_uses_first_directional_character_and_logical_anchors() {
     for (node, anchor, x) in [
         (nodes[0], "end", "10.00"),
         (nodes[1], "middle", "60.00"),
-        (nodes[2], "end", "110.00"),
+        (nodes[2], "start", "110.00"),
     ] {
         assert!(node.contains("direction=\"rtl\""));
         assert!(node.contains(&format!("text-anchor=\"{anchor}\"")));
@@ -90,6 +91,9 @@ fn svg_direction_uses_first_directional_character_and_logical_anchors() {
     assert!(nodes[3].contains("direction=\"ltr\""));
     assert!(nodes[3].contains("text-anchor=\"start\""));
     assert!(nodes[3].contains("x=\"10.00\""));
+    assert!(nodes[4].contains("direction=\"ltr\""));
+    assert!(nodes[4].contains("text-anchor=\"end\""));
+    assert!(nodes[4].contains("x=\"110.00\""));
 }
 
 #[test]

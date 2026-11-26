@@ -1,30 +1,53 @@
-use anyhow::Result;
+use crate::models::{ExcalidrawElement, ViewBox};
+use anyhow::{Context, Result, bail, ensure};
+use std::fs;
+use std::io::{BufWriter, ErrorKind, Write};
 use std::path::Path;
 use tiny_skia::Pixmap;
-use crate::models::{ExcalidrawElement, ViewBox};
 
-/// Save a pixmap to PNG with compression quality control (0-100).
+/// Write beside the destination, then replace its directory entry only on success.
+#[doc(hidden)]
+pub fn write_output(path: &Path, write: impl FnOnce(&mut dyn Write) -> Result<()>) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) => ensure!(
+            meta.is_file() || meta.is_symlink(),
+            "Output is not a regular file: {path:?}"
+        ),
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => bail!("Cannot inspect output {path:?}: {err}"),
+    }
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("Failed to create temporary output beside {path:?}"))?;
+    let mut writer = BufWriter::new(temp.as_file_mut());
+    write(&mut writer)?;
+    writer.flush().context("Failed to flush output")?;
+    drop(writer);
+    temp.persist(path)
+        .with_context(|| format!("Failed to replace output {path:?}"))?;
+    Ok(())
+}
+
+/// Save a pixmap to PNG, replacing the destination only after encoding succeeds.
+/// Replaces an output symlink itself, not its target.
+///
 /// Maps 0-100 to PNG compression types:
 /// - 0-25: Fast (fastest encoding, larger files)
 /// - 26-75: Default (balanced)
 /// - 76-100: Best (slowest encoding, smallest files)
-pub fn save_png_with_quality(
-    pixmap: &Pixmap,
-    output_path: &Path,
-    quality: u8,
-) -> Result<()> {
-    use std::io::BufWriter;
-    use std::fs::File;
-    
-    let file = File::create(output_path)
-        .map_err(|e| anyhow::anyhow!("Failed to create PNG file: {e}"))?;
-    let writer = BufWriter::new(file);
-    
-    let mut encoder = png::Encoder::new(writer, pixmap.width(), pixmap.height());
+pub fn save_png_with_quality(pixmap: &Pixmap, output_path: &Path, quality: u8) -> Result<()> {
+    write_output(output_path, |out| encode_png(pixmap, out, quality))
+}
+
+fn encode_png(pixmap: &Pixmap, out: impl Write, quality: u8) -> Result<()> {
+    let mut encoder = png::Encoder::new(out, pixmap.width(), pixmap.height());
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.set_filter(png::FilterType::Paeth);
-    
+
     // Map quality 0-100 to compression type
     let compression_type = if quality <= 25 {
         png::Compression::Fast
@@ -34,9 +57,10 @@ pub fn save_png_with_quality(
         png::Compression::Best
     };
     encoder.set_compression(compression_type);
-    
-    let mut writer = encoder.write_header()
-        .map_err(|e| anyhow::anyhow!("Failed to write PNG header: {e}"))?;
+
+    let mut writer = encoder
+        .write_header()
+        .context("Failed to write PNG header")?;
 
     // tiny-skia stores premultiplied RGBA; PNG expects straight (non-premultiplied)
     // alpha. Demultiply every pixel so semi-transparent colors aren't darkened.
@@ -45,10 +69,63 @@ pub fn save_png_with_quality(
         let c = pixel.demultiply();
         rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
     }
-    writer.write_image_data(&rgba)
-        .map_err(|e| anyhow::anyhow!("Failed to write PNG data: {e}"))?;
+    writer
+        .write_image_data(&rgba)
+        .context("Failed to write PNG data")?;
+    writer.finish().context("Failed to finish PNG file")
+}
 
-    Ok(())
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    #[test]
+    fn replaces_output_only_after_success() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let output = dir.path().join("drawing.svg");
+        fs::write(&output, "old")?;
+        assert!(
+            write_output(&output, |out| {
+                out.write_all(b"partial")?;
+                bail!("render failed")
+            })
+            .is_err()
+        );
+        assert_eq!(fs::read(&output)?, b"old");
+        assert_eq!(fs::read_dir(dir.path())?.count(), 1);
+
+        write_output(&output, |out| Ok(out.write_all(b"complete")?))?;
+        assert_eq!(fs::read(output)?, b"complete");
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replaces_symlink_without_changing_target() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let target = dir.path().join("original.svg");
+        let output = dir.path().join("drawing.svg");
+        fs::write(&target, b"original")?;
+        std::os::unix::fs::symlink(&target, &output)?;
+        write_output(&output, |out| Ok(out.write_all(b"new")?))?;
+        assert_eq!(fs::read(&output)?, b"new");
+        assert_eq!(fs::read(target)?, b"original");
+        assert!(!fs::symlink_metadata(output)?.is_symlink());
+        Ok(())
+    }
+
+    #[test]
+    fn writes_complete_png() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let output = dir.path().join("drawing.png");
+        fs::write(&output, "old")?;
+        save_png_with_quality(&Pixmap::new(1, 1).unwrap(), &output, 75)?;
+        let bytes = fs::read(output)?;
+        let mut reader = png::Decoder::new(bytes.as_slice()).read_info()?;
+        reader.next_frame(&mut [0; 4])?;
+        reader.finish()?;
+        Ok(())
+    }
 }
 
 /// Calculate the viewbox that encompasses all non-deleted elements
@@ -100,4 +177,3 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
         height: max_y - min_y + PADDING * 2.0,
     }
 }
-

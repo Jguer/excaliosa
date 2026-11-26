@@ -34,6 +34,7 @@ use crate::utils::{calculate_viewbox_with_labels, contributes_bounds};
 use super::arrow_label::{ResolvedArrowLabel, resolve_arrow_labels};
 use super::frame::{build_frame, containing_frame, frame_clip};
 use super::freedraw;
+use super::linear_geometry::{LinearMeasurements, measure_linear};
 use super::static_elements::{build_embed, build_sticky_note};
 use super::{
     Drawable, ImageAsset, ImageCrop, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene,
@@ -46,9 +47,17 @@ const DEFAULT_FONT_SIZE: f64 = 20.0;
 /// Build a [`Scene`] from parsed Excalidraw data. `background` is stored for the
 /// backend to fill before drawing.
 pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
-    let arrow_labels = resolve_arrow_labels(&data.elements);
-    let viewbox = calculate_viewbox_with_labels(&data.elements, &arrow_labels);
-    build_scene_with_labels(data, background, viewbox, arrow_labels)
+    let linear_measurements = measure_linear_elements(&data.elements);
+    let arrow_labels = resolve_arrow_labels(&data.elements, &linear_measurements);
+    let viewbox =
+        calculate_viewbox_with_labels(&data.elements, &arrow_labels, &linear_measurements);
+    build_scene_with_labels(
+        data,
+        background,
+        viewbox,
+        arrow_labels,
+        &linear_measurements,
+    )
 }
 
 pub(crate) fn build_scene_with_labels(
@@ -56,6 +65,7 @@ pub(crate) fn build_scene_with_labels(
     background: Option<Rgba>,
     viewbox: ViewBox,
     arrow_labels: HashMap<usize, ResolvedArrowLabel>,
+    linear_measurements: &LinearMeasurements,
 ) -> Scene {
     let cap_background = background
         .or_else(|| {
@@ -126,6 +136,9 @@ pub(crate) fn build_scene_with_labels(
                 &mut image_assets,
             )
         {
+            if let Some(measurement) = linear_measurements.get(&index) {
+                drawable.center = measurement.center;
+            }
             if let Some(label) = arrow_labels.get(&index) {
                 drawable.label_gap = Some(label.gap);
                 let label_drawable = build_element(
@@ -378,64 +391,38 @@ pub(super) fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<
 // Lines and arrows
 // ---------------------------------------------------------------------------
 
+pub(crate) fn measure_linear_elements(elements: &[ExcalidrawElement]) -> LinearMeasurements {
+    let generator = Generator::default();
+    elements
+        .iter()
+        .enumerate()
+        .filter(|(_, el)| !el.is_deleted && matches!(el.element_type.as_str(), "line" | "arrow"))
+        .map(|(index, el)| {
+            let outline = generate_linear_shaft(&generator, el, true).map(|(shaft, _)| {
+                lower_drawable(
+                    &shaft,
+                    Some(Rgba(0, 0, 0, 255)),
+                    None,
+                    el.stroke_width,
+                    None,
+                )
+            });
+            (index, measure_linear(el, outline.as_deref()))
+        })
+        .collect()
+}
+
 fn build_line(
     generator: &Generator,
     el: &ExcalidrawElement,
     cap_background: Rgba,
 ) -> Option<Vec<PaintedPath>> {
     let points = el.points.as_ref()?;
-    if points.is_empty() {
-        return None;
-    }
-    let elbowed = el.element_type == "arrow" && el.elbowed.unwrap_or(false);
-    if elbowed && !has_renderable_elbow_geometry(el) {
-        return None;
-    }
-
-    let abs: Vec<(f64, f64)> = points
-        .iter()
-        .map(|(px, py)| (el.x + px, el.y + py))
-        .collect();
+    let (shaft, fill) = generate_linear_shaft(generator, el, false)?;
     let should_stroke = has_stroke(el);
     let stroke = should_stroke.then(|| Rgba::from_tuple(parse_color(&el.stroke_color)));
     let dash = get_stroke_dash_array(&el.stroke_style, el.stroke_width);
-    let curved = !elbowed && el.roundness.is_some() && points.len() >= 3;
-    // Upstream considers a line closed when its endpoints are within 8 px at 1× zoom.
-    let first = points[0];
-    let last = points[points.len() - 1];
-    let fill = if el.element_type == "line"
-        && points.len() >= 3
-        && (last.0 - first.0).hypot(last.1 - first.1) <= 8.0
-    {
-        fill_color(el).map(Rgba::from_tuple)
-    } else {
-        None
-    };
-    let mut opts = rough_options(el, should_stroke, fill.is_some(), elbowed);
-    if fill.is_some() && el.fill_style != "solid" {
-        let gap = f64::from(opts.hachure_gap.unwrap_or(0.0).max(0.1));
-        // roughr scans rotated world-space polygons; keep the outline when its step rounds away.
-        let scan_advances = abs.iter().all(|(x, y)| {
-            let extent = x.abs() + y.abs();
-            extent.is_finite() && extent + gap > extent && -extent + gap > -extent
-        });
-        if !scan_advances {
-            opts.fill = None;
-        }
-    }
-    let shaft = if elbowed && abs.len() >= 3 {
-        match build_elbow_arrow_path(&abs, 16.0) {
-            Some(d) => generator.path::<f64>(d, &Some(opts)),
-            None => generator.linear_path::<f64>(&to_points(&abs), false, &Some(opts)),
-        }
-    } else if curved {
-        generator.curve::<f64>(&to_points(&abs), &Some(opts))
-    } else if fill.is_some() {
-        generator.polygon::<f64>(&to_points(&abs), &Some(opts))
-    } else {
-        generator.linear_path::<f64>(&to_points(&abs), false, &Some(opts))
-    };
-
+    let curved = !el.elbowed.unwrap_or(false) && el.roundness.is_some() && points.len() >= 3;
     let mut out = lower_drawable(&shaft, stroke, fill, el.stroke_width, dash);
 
     // Caps share the element seed but apply their own roughness and dash rules.
@@ -463,6 +450,65 @@ fn build_line(
     }
 
     Some(out)
+}
+
+/// Select and generate the shaft once for painting or outline-only preflight.
+fn generate_linear_shaft(
+    generator: &Generator,
+    el: &ExcalidrawElement,
+    outline_only: bool,
+) -> Option<(RoughDrawable<f64>, Option<Rgba>)> {
+    let points = el.points.as_ref()?;
+    if points.is_empty() {
+        return None;
+    }
+    let elbowed = el.element_type == "arrow" && el.elbowed.unwrap_or(false);
+    if elbowed && !has_renderable_elbow_geometry(el) {
+        return None;
+    }
+
+    let abs: Vec<(f64, f64)> = points
+        .iter()
+        .map(|(px, py)| (el.x + px, el.y + py))
+        .collect();
+    let curved = !elbowed && el.roundness.is_some() && points.len() >= 3;
+    // Upstream considers a line closed when its endpoints are within 8 px at 1× zoom.
+    let first = points[0];
+    let last = points[points.len() - 1];
+    let fill = if el.element_type == "line"
+        && points.len() >= 3
+        && (last.0 - first.0).hypot(last.1 - first.1) <= 8.0
+    {
+        fill_color(el).map(Rgba::from_tuple)
+    } else {
+        None
+    };
+    let mut opts = rough_options(el, has_stroke(el), !outline_only && fill.is_some(), elbowed);
+    if !outline_only && fill.is_some() && el.fill_style != "solid" {
+        let gap = f64::from(opts.hachure_gap.unwrap_or(0.0).max(0.1));
+        // roughr scans rotated world-space polygons; keep the outline when its step rounds away.
+        let scan_advances = abs.iter().all(|(x, y)| {
+            let extent = x.abs() + y.abs();
+            extent.is_finite() && extent + gap > extent && -extent + gap > -extent
+        });
+        if !scan_advances {
+            opts.fill = None;
+        }
+    }
+    let shaft = if elbowed && abs.len() >= 3 {
+        match build_elbow_arrow_path(&abs, 16.0) {
+            Some(d) => generator.path::<f64>(d, &Some(opts)),
+            None => generator.linear_path::<f64>(&to_points(&abs), false, &Some(opts)),
+        }
+    } else if curved {
+        generator.curve::<f64>(&to_points(&abs), &Some(opts))
+    } else if fill.is_some() {
+        // Keep polygon selection during preflight, but omit its fill generation.
+        generator.polygon::<f64>(&to_points(&abs), &Some(opts))
+    } else {
+        generator.linear_path::<f64>(&to_points(&abs), false, &Some(opts))
+    };
+    Some((shaft, fill))
 }
 
 fn arrowhead_paths(
@@ -1119,5 +1165,38 @@ mod rough_option_tests {
             rough_options(&el, true, false, false).curve_fitting,
             Some(0.95)
         );
+    }
+
+    #[test]
+    fn outline_only_shaft_matches_the_painted_outline() {
+        let mut curved = element("arrow", 100.0, 100.0, true);
+        curved.points = Some(vec![(0.0, 0.0), (40.0, 100.0), (100.0, 0.0)]);
+        curved.seed = 42;
+        let mut closed = element("line", 100.0, 100.0, false);
+        closed.points = Some(vec![(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 0.0)]);
+        closed.background_color = "#ff0000".into();
+        closed.fill_style = "hachure".into();
+        closed.seed = 42;
+
+        for el in [curved, closed] {
+            let generator = Generator::default();
+            let (painted, _) = generate_linear_shaft(&generator, &el, false).unwrap();
+            let (outline, _) = generate_linear_shaft(&generator, &el, true).unwrap();
+            assert!(
+                outline
+                    .sets
+                    .iter()
+                    .all(|set| set.op_set_type == OpSetType::Path)
+            );
+            let path_ops = |drawable: &RoughDrawable<f64>| {
+                drawable
+                    .sets
+                    .iter()
+                    .filter(|set| set.op_set_type == OpSetType::Path)
+                    .map(convert_ops)
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(path_ops(&outline), path_ops(&painted));
+        }
     }
 }

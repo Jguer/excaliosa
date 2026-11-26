@@ -56,7 +56,7 @@ fn bundled_leftward_connector_is_inside_viewport() {
 }
 
 #[test]
-fn linear_bounds_use_the_renderers_stored_box_pivot() {
+fn linear_bounds_use_the_generated_shaft_pivot() {
     let element = ExcalidrawElement {
         x: 100.0,
         y: 50.0,
@@ -67,9 +67,10 @@ fn linear_bounds_use_the_renderers_stored_box_pivot() {
         ..arrow("arrow")
     };
     let scene = scene_for(vec![element], None);
-    assert_eq!(scene.drawables[0].center, (150.0, 60.0));
-    assert!((scene.viewbox.min_x - 120.0).abs() < 1e-9);
-    assert!((scene.viewbox.min_y - (-130.0)).abs() < 1e-9);
+    assert_eq!(scene.drawables[0].center, (50.0, 50.0));
+    assert!((scene.viewbox.min_x - 10.0).abs() < 1e-9);
+    assert!((scene.viewbox.min_y - (-40.0)).abs() < 1e-9);
+    assert!((scene.viewbox.width - 80.0).abs() < 1e-9);
     assert!((scene.viewbox.height - 180.0).abs() < 1e-9);
 }
 

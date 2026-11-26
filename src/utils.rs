@@ -1,5 +1,7 @@
 use crate::models::{ExcalidrawElement, ViewBox};
 use crate::scene::arrow_label::{ResolvedArrowLabel, resolve_arrow_labels};
+use crate::scene::build::measure_linear_elements;
+use crate::scene::linear_geometry::LinearMeasurements;
 use anyhow::{Context, Result, bail, ensure};
 use std::collections::HashMap;
 use std::fs;
@@ -151,13 +153,15 @@ pub(crate) fn contributes_bounds(element_type: &str) -> bool {
 
 /// Calculate the viewbox for non-deleted supported elements and frames.
 pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
-    let arrow_labels = resolve_arrow_labels(elements);
-    calculate_viewbox_with_labels(elements, &arrow_labels)
+    let linear_measurements = measure_linear_elements(elements);
+    let arrow_labels = resolve_arrow_labels(elements, &linear_measurements);
+    calculate_viewbox_with_labels(elements, &arrow_labels, &linear_measurements)
 }
 
 pub(crate) fn calculate_viewbox_with_labels(
     elements: &[ExcalidrawElement],
     arrow_labels: &HashMap<usize, ResolvedArrowLabel>,
+    linear_measurements: &LinearMeasurements,
 ) -> ViewBox {
     const PADDING: f64 = 40.0;
 
@@ -174,8 +178,6 @@ pub(crate) fn calculate_viewbox_with_labels(
         if el.is_deleted || bound_text.contains(&index) || !contributes_bounds(&el.element_type) {
             continue;
         }
-        // Linear points can extend left or above their origin. Keep the same
-        // stored-box rotation pivot as the renderer, regardless of the bounds.
         let (cx, cy) = if el.element_type == "freedraw" {
             crate::scene::freedraw::point_center(el).unwrap_or_else(|| {
                 crate::math_utils::calculate_center(el.x, el.y, el.width, el.height)
@@ -184,15 +186,19 @@ pub(crate) fn calculate_viewbox_with_labels(
             crate::math_utils::calculate_center(el.x, el.y, el.width, el.height)
         };
         let (sin, cos) = el.angle.sin_cos();
-        let mut include = |px: f64, py: f64| {
-            let (dx, dy) = (px - cx, py - cy);
-            let rx = cx + dx * cos - dy * sin;
-            let ry = cy + dx * sin + dy * cos;
+        let mut include_rotated = |rx: f64, ry: f64| {
             min_x = min_x.min(rx);
             min_y = min_y.min(ry);
             max_x = max_x.max(rx);
             max_y = max_y.max(ry);
         };
+        macro_rules! include {
+            ($px:expr, $py:expr $(,)?) => {{
+                let (px, py) = ($px, $py);
+                let (dx, dy) = (px - cx, py - cy);
+                include_rotated(cx + dx * cos - dy * sin, cy + dx * sin + dy * cos);
+            }};
+        }
         match (el.element_type.as_str(), el.points.as_deref()) {
             ("freedraw", _) => {
                 if el.opacity > 0.0
@@ -204,22 +210,27 @@ pub(crate) fn calculate_viewbox_with_labels(
                     for op in paths.iter().flat_map(|path| &path.ops) {
                         match *op {
                             crate::scene::PathOp::Move(x, y) | crate::scene::PathOp::Line(x, y) => {
-                                include(x, y)
+                                include!(x, y)
                             }
                             crate::scene::PathOp::Cubic(x1, y1, x2, y2, x, y) => {
-                                include(x1, y1);
-                                include(x2, y2);
-                                include(x, y);
+                                include!(x1, y1);
+                                include!(x2, y2);
+                                include!(x, y);
                             }
                             crate::scene::PathOp::Close => {}
                         }
                     }
                 }
             }
-            ("line" | "arrow", Some(points)) if !points.is_empty() => {
-                // shortcut: padding covers normal overshoot; use painted paths for exact bounds.
-                for &(x, y) in points {
-                    include(el.x + x, el.y + y);
+            ("line" | "arrow", points) => {
+                if let Some(measurement) = linear_measurements.get(&index) {
+                    let bounds = measurement.rotated_bounds;
+                    include_rotated(bounds.min_x, bounds.min_y);
+                    include_rotated(bounds.max_x, bounds.max_y);
+                } else if let Some(points) = points {
+                    for &(x, y) in points {
+                        include!(el.x + x, el.y + y);
+                    }
                 }
                 if let Some(label) = arrow_labels.get(&index) {
                     let text = &elements[label.text_index];
@@ -237,29 +248,41 @@ pub(crate) fn calculate_viewbox_with_labels(
                         (label.x, label.y + text.height),
                     ] {
                         let (dx, dy) = (px - label_cx, py - label_cy);
-                        let rx = label_cx + dx * label_cos - dy * label_sin;
-                        let ry = label_cy + dx * label_sin + dy * label_cos;
-                        min_x = min_x.min(rx);
-                        min_y = min_y.min(ry);
-                        max_x = max_x.max(rx);
-                        max_y = max_y.max(ry);
+                        include_rotated(
+                            label_cx + dx * label_cos - dy * label_sin,
+                            label_cy + dx * label_sin + dy * label_cos,
+                        );
                     }
                 }
             }
+            ("diamond", _) => {
+                include!(el.x + el.width / 2.0, el.y);
+                include!(el.x + el.width, el.y + el.height / 2.0);
+                include!(el.x + el.width / 2.0, el.y + el.height);
+                include!(el.x, el.y + el.height / 2.0);
+            }
+            ("ellipse", _) => {
+                let rx = el.width.abs() / 2.0;
+                let ry = el.height.abs() / 2.0;
+                let half_width = (rx * cos).hypot(ry * sin);
+                let half_height = (rx * sin).hypot(ry * cos);
+                include_rotated(cx - half_width, cy - half_height);
+                include_rotated(cx + half_width, cy + half_height);
+            }
             _ => {
-                include(el.x, el.y);
-                include(el.x + el.width, el.y);
-                include(el.x + el.width, el.y + el.height);
-                include(el.x, el.y + el.height);
+                include!(el.x, el.y);
+                include!(el.x + el.width, el.y);
+                include!(el.x + el.width, el.y + el.height);
+                include!(el.x, el.y + el.height);
                 if el.element_type == "stickynote" {
                     const SHADOW_OFFSET: f64 = 3.0;
-                    include(el.x + SHADOW_OFFSET, el.y + SHADOW_OFFSET);
-                    include(el.x + el.width + SHADOW_OFFSET, el.y + SHADOW_OFFSET);
-                    include(
+                    include!(el.x + SHADOW_OFFSET, el.y + SHADOW_OFFSET);
+                    include!(el.x + el.width + SHADOW_OFFSET, el.y + SHADOW_OFFSET);
+                    include!(
                         el.x + el.width + SHADOW_OFFSET,
                         el.y + el.height + SHADOW_OFFSET,
                     );
-                    include(el.x + SHADOW_OFFSET, el.y + el.height + SHADOW_OFFSET);
+                    include!(el.x + SHADOW_OFFSET, el.y + el.height + SHADOW_OFFSET);
                 }
             }
         }

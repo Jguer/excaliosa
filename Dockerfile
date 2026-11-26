@@ -3,11 +3,7 @@
 FROM rust:alpine AS builder
 WORKDIR /app
 
-# System dependencies for building with fontconfig (Alpine)
-RUN apk add --no-cache \
-  build-base \
-  pkgconf \
-  fontconfig-dev
+RUN apk add --no-cache build-base
 
 COPY Cargo.toml ./
 COPY Cargo.lock ./
@@ -22,11 +18,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 
 FROM alpine:3.20 AS runtime
-
-RUN apk add --no-cache \
-    ca-certificates \
-    fontconfig \
-    ttf-dejavu
 
 # Create an unprivileged user (Alpine uses adduser/addgroup)
 RUN addgroup -S app && adduser -S -G app -u 10001 appuser

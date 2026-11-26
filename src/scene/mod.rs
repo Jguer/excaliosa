@@ -85,6 +85,15 @@ pub struct TextPrimitive {
     pub container_width: f64,
 }
 
+/// A source crop, normalized to the image's natural dimensions.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ImageCrop {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// A raster image referenced by a validated data URL.
 #[derive(Clone, Debug)]
 pub struct ImagePrimitive {
@@ -95,6 +104,8 @@ pub struct ImagePrimitive {
     pub data_url: String,
     pub flip_x: bool,
     pub flip_y: bool,
+    pub crop: Option<ImageCrop>,
+    pub corner_radius: f64,
 }
 
 #[derive(Clone, Debug)]

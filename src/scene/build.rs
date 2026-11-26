@@ -24,7 +24,8 @@ use crate::stroke_utils::get_stroke_dash_array;
 use crate::utils::{calculate_viewbox, contributes_bounds};
 
 use super::{
-    Drawable, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene, TextAlign, TextPrimitive,
+    Drawable, ImageCrop, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene, TextAlign,
+    TextPrimitive,
 };
 
 /// Default font size used when an element omits one (Excalidraw "medium").
@@ -379,6 +380,19 @@ fn build_image(el: &ExcalidrawElement, files: &HashMap<String, Value>) -> Option
     // Negative scale components flip the image on that axis.
     let flip_x = el.scale.as_ref().and_then(|s| s.first()).is_some_and(|v| *v < 0.0);
     let flip_y = el.scale.as_ref().and_then(|s| s.get(1)).is_some_and(|v| *v < 0.0);
+    let crop = validated_image_crop(el);
+    let corner_radius = if el.roundness.is_some() {
+        let radius = get_corner_radius(el.width.min(el.height), el);
+        if radius.is_finite() {
+            radius
+                .max(0.0)
+                .min((el.width.min(el.height) / 2.0).max(0.0))
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
     Some(ImagePrimitive {
         x: el.x,
         y: el.y,
@@ -387,7 +401,73 @@ fn build_image(el: &ExcalidrawElement, files: &HashMap<String, Value>) -> Option
         data_url,
         flip_x,
         flip_y,
+        crop,
+        corner_radius,
     })
+}
+
+fn validated_image_crop(el: &ExcalidrawElement) -> Option<ImageCrop> {
+    let value = el.crop.as_ref()?;
+    let field = |name: &str| value.get(name)?.as_f64().filter(|v| v.is_finite());
+    let (x, y, width, height) = (field("x")?, field("y")?, field("width")?, field("height")?);
+    let natural_width = field("naturalWidth")?;
+    let natural_height = field("naturalHeight")?;
+    // Excalidraw's derived source-edge values can exceed the natural size by a few ulps.
+    let x_margin = natural_width * f64::EPSILON * 8.0;
+    let y_margin = natural_height * f64::EPSILON * 8.0;
+    if x < -x_margin
+        || y < -y_margin
+        || width <= 0.0
+        || height <= 0.0
+        || natural_width <= 0.0
+        || natural_height <= 0.0
+        || x + width > natural_width + x_margin
+        || y + height > natural_height + y_margin
+    {
+        return None;
+    }
+    let x = x.clamp(0.0, natural_width);
+    let y = y.clamp(0.0, natural_height);
+    let width = width.min(natural_width - x);
+    let height = height.min(natural_height - y);
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+
+    let crop = ImageCrop {
+        x: x / natural_width,
+        y: y / natural_height,
+        width: width / natural_width,
+        height: height / natural_height,
+    };
+    // The same ratios drive both backends' uncropped placement and sampling.
+    let uncropped_width = el.width / crop.width;
+    let uncropped_height = el.height / crop.height;
+    if !uncropped_width.is_finite() || !uncropped_height.is_finite() {
+        return None;
+    }
+
+    // PNG performs these operations in f32; reject values it cannot represent safely.
+    let raster_crop_width = crop.width as f32;
+    let raster_crop_height = crop.height as f32;
+    let raster_offset_x = (crop.x * uncropped_width) as f32;
+    let raster_offset_y = (crop.y * uncropped_height) as f32;
+    if raster_crop_width <= 0.0
+        || raster_crop_height <= 0.0
+        || ![
+            el.width as f32 / raster_crop_width,
+            el.height as f32 / raster_crop_height,
+            raster_offset_x,
+            raster_offset_y,
+            raster_offset_x + el.width as f32,
+            raster_offset_y + el.height as f32,
+        ]
+        .into_iter()
+        .all(f32::is_finite)
+    {
+        return None;
+    }
+    Some(crop)
 }
 
 /// Allowlist raster image data URLs. SVG data URLs are rejected (they can carry

@@ -142,6 +142,9 @@ pub(crate) fn contributes_bounds(element_type: &str) -> bool {
             | "freedraw"
             | "text"
             | "image"
+            | "stickynote"
+            | "iframe"
+            | "embeddable"
     )
 }
 
@@ -211,6 +214,16 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
                 include(el.x + el.width, el.y);
                 include(el.x + el.width, el.y + el.height);
                 include(el.x, el.y + el.height);
+                if el.element_type == "stickynote" {
+                    const SHADOW_OFFSET: f64 = 3.0;
+                    include(el.x + SHADOW_OFFSET, el.y + SHADOW_OFFSET);
+                    include(el.x + el.width + SHADOW_OFFSET, el.y + SHADOW_OFFSET);
+                    include(
+                        el.x + el.width + SHADOW_OFFSET,
+                        el.y + el.height + SHADOW_OFFSET,
+                    );
+                    include(el.x + SHADOW_OFFSET, el.y + el.height + SHADOW_OFFSET);
+                }
             }
         }
     }

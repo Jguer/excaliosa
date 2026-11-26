@@ -83,6 +83,8 @@ pub struct ExcalidrawElement {
     pub pressures: Option<Vec<f64>>,
     pub simulate_pressure: bool,
     pub stroke_options: Option<StrokeOptions>,
+    // Sticky-note creation timestamp in milliseconds since the Unix epoch.
+    pub created: Option<f64>,
     // Image element fields (type="image")
     pub file_id: Option<String>,
     pub scale: Option<Vec<f64>>,
@@ -139,6 +141,7 @@ impl Default for ExcalidrawElement {
             pressures: None,
             simulate_pressure: false,
             stroke_options: None,
+            created: None,
             file_id: None,
             scale: None,
             crop: None,

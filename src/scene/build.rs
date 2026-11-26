@@ -10,7 +10,7 @@ use palette::Srgba;
 use roughr::core::{Drawable as RoughDrawable, FillStyle, OpSet, OpSetType, OpType, Options};
 use roughr::generator::Generator;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
 use crate::color_utils::{fill_color, has_stroke, parse_color};
@@ -24,6 +24,7 @@ use crate::stroke_utils::get_stroke_dash_array;
 use crate::utils::{calculate_viewbox, contributes_bounds};
 
 use super::freedraw;
+use super::static_elements::{build_embed, build_sticky_note};
 use super::{
     Drawable, ImageCrop, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene, TextAlign,
     TextPrimitive,
@@ -39,15 +40,40 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
     let generator = Generator::default();
     let mut unsupported = 0;
 
-    let drawables = data
+    let sticky_labels: HashMap<&str, &ExcalidrawElement> = data
         .elements
         .iter()
-        .filter(|el| !el.is_deleted)
-        .filter_map(|el| {
-            unsupported += usize::from(!contributes_bounds(&el.element_type));
-            build_element(&generator, el, &data.files, background)
+        .filter(|el| !el.is_deleted && el.element_type == "stickynote")
+        .filter_map(|note| {
+            sticky_bound_text(note, &data.elements).map(|text| (note.id.as_str(), text))
         })
         .collect();
+    let sticky_text_ids: HashSet<&str> = sticky_labels
+        .values()
+        .map(|text| text.id.as_str())
+        .collect();
+    let mut drawables = Vec::new();
+    let mut embeds = Vec::new();
+
+    for el in data.elements.iter().filter(|el| !el.is_deleted) {
+        unsupported += usize::from(!contributes_bounds(&el.element_type));
+        if matches!(el.element_type.as_str(), "iframe" | "embeddable") {
+            embeds.extend(build_embed(el));
+        } else if el.element_type == "stickynote" {
+            drawables.extend(build_sticky_note(el));
+            if let Some(text) = sticky_labels.get(el.id.as_str())
+                && let Some(label) = build_element(&generator, text, &data.files, background)
+            {
+                drawables.push(label);
+            }
+        } else if !sticky_text_ids.contains(el.id.as_str())
+            && let Some(drawable) = build_element(&generator, el, &data.files, background)
+        {
+            drawables.push(drawable);
+        }
+    }
+    // Iframe-like placeholders always paint above ordinary scene elements.
+    drawables.extend(embeds);
     if unsupported > 0 {
         use std::io::Write;
         let _ = writeln!(
@@ -69,16 +95,6 @@ fn build_element(
     files: &HashMap<String, Value>,
     background: Option<Rgba>,
 ) -> Option<Drawable> {
-    let opacity = (el.opacity / 100.0).clamp(0.0, 1.0);
-    let center = if el.element_type == "freedraw" {
-        freedraw::point_center(el)
-            .unwrap_or_else(|| calculate_center(el.x, el.y, el.width, el.height))
-    } else {
-        calculate_center(el.x, el.y, el.width, el.height)
-    };
-    // Excalidraw stores `angle` in radians; rotation transforms take degrees.
-    let rotation_deg = el.angle.to_degrees();
-
     let primitive = match el.element_type.as_str() {
         "rectangle" | "ellipse" | "diamond" => Primitive::Paths(build_shape(generator, el)),
         "line" | "arrow" => Primitive::Paths(build_line(generator, el, background)?),
@@ -88,20 +104,50 @@ fn build_element(
         _ => return None,
     };
 
-    Some(Drawable {
+    Some(drawable(el, primitive))
+}
+
+fn sticky_bound_text<'a>(
+    note: &ExcalidrawElement,
+    elements: &'a [ExcalidrawElement],
+) -> Option<&'a ExcalidrawElement> {
+    let text_id = note
+        .bound_elements
+        .as_ref()?
+        .iter()
+        .find(|bound| bound.element_type == "text")?
+        .id
+        .as_str();
+    elements.iter().find(|text| {
+        !text.is_deleted
+            && text.element_type == "text"
+            && text.id == text_id
+            && text.container_id.as_deref() == Some(note.id.as_str())
+    })
+}
+
+pub(super) fn drawable(el: &ExcalidrawElement, primitive: Primitive) -> Drawable {
+    let center = if el.element_type == "freedraw" {
+        freedraw::point_center(el)
+            .unwrap_or_else(|| calculate_center(el.x, el.y, el.width, el.height))
+    } else {
+        calculate_center(el.x, el.y, el.width, el.height)
+    };
+    // Excalidraw stores angles in radians; backends rotate in degrees.
+    Drawable {
         primitive,
         link: el.link.clone(),
-        opacity,
-        rotation_deg,
+        opacity: (el.opacity / 100.0).clamp(0.0, 1.0),
+        rotation_deg: el.angle.to_degrees(),
         center,
-    })
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Closed shapes: rectangle, ellipse, diamond
 // ---------------------------------------------------------------------------
 
-fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath> {
+pub(super) fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath> {
     let should_stroke = has_stroke(el);
     let stroke = should_stroke.then(|| Rgba::from_tuple(parse_color(&el.stroke_color)));
     let fill = fill_color(el).map(Rgba::from_tuple);

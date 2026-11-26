@@ -8,6 +8,7 @@
 
 pub mod build;
 pub(crate) mod freedraw;
+mod static_elements;
 
 pub use build::build_scene;
 

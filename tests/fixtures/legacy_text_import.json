@@ -1,0 +1,103 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "excaliosa-legacy-text-import-test",
+  "elements": [
+    {
+      "id": "legacy-multiline",
+      "type": "text",
+      "x": 20,
+      "y": 20,
+      "width": 360,
+      "height": 117.6,
+      "strokeColor": "#1e1e1e",
+      "text": "Legacy first\r\n\r\nthird\n",
+      "font": "28px Cascadia"
+    },
+    {
+      "id": "explicit-override",
+      "type": "text",
+      "x": 420,
+      "y": 20,
+      "width": 260,
+      "height": 40,
+      "strokeColor": "#1e1e1e",
+      "text": "Explicit\r\noverride",
+      "font": "20px Helvetica",
+      "lineHeight": 1.6
+    },
+    {
+      "id": "unknown-family",
+      "type": "text",
+      "x": 20,
+      "y": 200,
+      "width": 300,
+      "height": 60,
+      "strokeColor": "#1e1e1e",
+      "text": "Unknown family",
+      "font": "24px MadeUp"
+    },
+    {
+      "id": "missing-height",
+      "type": "text",
+      "x": 380,
+      "y": 200,
+      "width": 220,
+      "strokeColor": "#1e1e1e",
+      "text": "Missing height",
+      "font": "28px Cascadia"
+    },
+    {
+      "id": "zero-height",
+      "type": "text",
+      "x": 650,
+      "y": 200,
+      "width": 220,
+      "height": 0,
+      "strokeColor": "#1e1e1e",
+      "text": "Zero height",
+      "font": "28px Cascadia"
+    },
+    {
+      "id": "malformed-string",
+      "type": "text",
+      "x": 20,
+      "y": 320,
+      "width": 280,
+      "height": 200,
+      "strokeColor": "#1e1e1e",
+      "text": "Malformed\r\nfont",
+      "font": "broken",
+      "fontSize": 22,
+      "fontFamily": 8
+    },
+    {
+      "id": "malformed-type",
+      "type": "text",
+      "x": 360,
+      "y": 320,
+      "width": 280,
+      "height": 90,
+      "strokeColor": "#1e1e1e",
+      "text": "Malformed type",
+      "font": 42,
+      "fontSize": 18,
+      "fontFamily": 9,
+      "lineHeight": 1.3
+    },
+    {
+      "id": "modern-default",
+      "type": "text",
+      "x": 700,
+      "y": 320,
+      "width": 260,
+      "height": 240,
+      "strokeColor": "#1e1e1e",
+      "text": "Modern\r\ndefault",
+      "fontSize": 20,
+      "fontFamily": 3
+    }
+  ],
+  "appState": {},
+  "files": {}
+}

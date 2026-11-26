@@ -8,6 +8,32 @@ pub fn get_font_family(font_id: Option<i32>) -> &'static str {
     }
 }
 
+/// Migrate the legacy CSS-like font shorthand to Excalidraw's numeric fields.
+pub(crate) fn parse_legacy_font(font: &str) -> Option<(f64, i32)> {
+    let (size, family) = font.split_once(' ')?;
+    let size = size
+        .strip_suffix("px")
+        .unwrap_or(size)
+        .parse::<f64>()
+        .ok()?;
+    if !size.is_finite() {
+        return None;
+    }
+    let family = match family {
+        "Virgil" => 1,
+        "Helvetica" => 2,
+        "Cascadia" => 3,
+        "Nunito" => 6,
+        "Lilita One" => 7,
+        "Comic Shanns" => 8,
+        "Liberation Sans" => 9,
+        "Assistant" => 10,
+        "Excalifont" => 5,
+        _ => 5,
+    };
+    Some((size, family))
+}
+
 /// Normalize Excalidraw's accepted newline forms without dropping empty lines.
 pub fn normalize_newlines(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")

@@ -23,6 +23,7 @@ use crate::rect_utils::{
 use crate::stroke_utils::get_stroke_dash_array;
 use crate::utils::{calculate_viewbox, contributes_bounds};
 
+use super::freedraw;
 use super::{
     Drawable, ImageCrop, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene, TextAlign,
     TextPrimitive,
@@ -69,13 +70,19 @@ fn build_element(
     background: Option<Rgba>,
 ) -> Option<Drawable> {
     let opacity = (el.opacity / 100.0).clamp(0.0, 1.0);
-    let center = calculate_center(el.x, el.y, el.width, el.height);
+    let center = if el.element_type == "freedraw" {
+        freedraw::point_center(el)
+            .unwrap_or_else(|| calculate_center(el.x, el.y, el.width, el.height))
+    } else {
+        calculate_center(el.x, el.y, el.width, el.height)
+    };
     // Excalidraw stores `angle` in radians; rotation transforms take degrees.
     let rotation_deg = el.angle.to_degrees();
 
     let primitive = match el.element_type.as_str() {
         "rectangle" | "ellipse" | "diamond" => Primitive::Paths(build_shape(generator, el)),
         "line" | "arrow" => Primitive::Paths(build_line(generator, el, background)?),
+        "freedraw" => Primitive::Paths(freedraw::build_freedraw(generator, el)?),
         "text" => Primitive::Text(build_text(el)?),
         "image" => Primitive::Image(build_image(el, files)?),
         _ => return None,
@@ -488,7 +495,7 @@ fn is_allowed_raster_data_url(data_url: &str) -> bool {
 /// Build roughr options for an element. Colors only signal *presence* of a
 /// stroke/fill (the real colors are applied when lowering the op-sets), so
 /// geometry generation matches regardless of the element's actual palette.
-fn rough_options(
+pub(super) fn rough_options(
     el: &ExcalidrawElement,
     should_stroke: bool,
     should_fill: bool,
@@ -541,7 +548,7 @@ fn adjusted_roughness(el: &ExcalidrawElement) -> f64 {
 
 /// Convert a roughr [`Drawable`] into painted paths, mapping each op-set to the
 /// element's real colors using the same rules as `roughr`'s `to_paths`.
-fn lower_drawable(
+pub(super) fn lower_drawable(
     drawable: &RoughDrawable<f64>,
     stroke: Option<Rgba>,
     fill: Option<Rgba>,
@@ -610,7 +617,7 @@ fn convert_ops(set: &OpSet<f64>) -> Vec<PathOp> {
         .collect()
 }
 
-fn to_points(points: &[(f64, f64)]) -> Vec<Point2D<f64>> {
+pub(super) fn to_points(points: &[(f64, f64)]) -> Vec<Point2D<f64>> {
     points.iter().map(|(x, y)| Point2D::new(*x, *y)).collect()
 }
 

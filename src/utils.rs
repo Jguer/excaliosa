@@ -132,7 +132,16 @@ pub(crate) fn contributes_bounds(element_type: &str) -> bool {
     // Frames still reserve space even though we don't paint their borders.
     matches!(
         element_type,
-        "frame" | "magicframe" | "rectangle" | "ellipse" | "diamond" | "line" | "arrow" | "text" | "image"
+        "frame"
+            | "magicframe"
+            | "rectangle"
+            | "ellipse"
+            | "diamond"
+            | "line"
+            | "arrow"
+            | "freedraw"
+            | "text"
+            | "image"
     )
 }
 
@@ -151,7 +160,13 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
         }
         // Linear points can extend left or above their origin. Keep the same
         // stored-box rotation pivot as the renderer, regardless of the bounds.
-        let (cx, cy) = crate::math_utils::calculate_center(el.x, el.y, el.width, el.height);
+        let (cx, cy) = if el.element_type == "freedraw" {
+            crate::scene::freedraw::point_center(el).unwrap_or_else(|| {
+                crate::math_utils::calculate_center(el.x, el.y, el.width, el.height)
+            })
+        } else {
+            crate::math_utils::calculate_center(el.x, el.y, el.width, el.height)
+        };
         let (sin, cos) = el.angle.sin_cos();
         let mut include = |px: f64, py: f64| {
             let (dx, dy) = (px - cx, py - cy);
@@ -163,6 +178,20 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
             max_y = max_y.max(ry);
         };
         match (el.element_type.as_str(), el.points.as_deref()) {
+            ("freedraw", points) => {
+                if let Some(outline) = crate::scene::freedraw::outline(el) {
+                    for (x, y) in outline {
+                        include(x, y);
+                    }
+                } else if let Some(points) = points {
+                    for &(x, y) in points {
+                        let (x, y) = (el.x + x, el.y + y);
+                        if x.is_finite() && y.is_finite() {
+                            include(x, y);
+                        }
+                    }
+                }
+            }
             ("line" | "arrow", Some(points)) if !points.is_empty() => {
                 // shortcut: padding covers normal overshoot; use painted paths for exact bounds.
                 for &(x, y) in points {

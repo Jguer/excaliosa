@@ -4,6 +4,7 @@ use crate::math_utils::{CubicBezierSegment, calculate_center, catmull_rom_cubics
 use crate::models::{ExcalidrawElement, has_renderable_elbow_geometry};
 
 use super::LabelGap;
+use super::linear_geometry::LinearMeasurements;
 
 const LABEL_GAP_PADDING: f64 = 5.0;
 const CURVE_SAMPLES: usize = 64;
@@ -20,6 +21,7 @@ pub(crate) struct ResolvedArrowLabel {
 /// resolved position remain ordinary text at their saved coordinates.
 pub(crate) fn resolve_arrow_labels(
     elements: &[ExcalidrawElement],
+    linear_measurements: &LinearMeasurements,
 ) -> HashMap<usize, ResolvedArrowLabel> {
     let mut arrows_by_id: HashMap<&str, Vec<usize>> = HashMap::new();
     let mut text_id_counts: HashMap<&str, usize> = HashMap::new();
@@ -100,7 +102,11 @@ pub(crate) fn resolve_arrow_labels(
             continue;
         }
 
-        let Some(center) = label_center(arrow, text.label_position) else {
+        let pivot = linear_measurements.get(&arrow_index).map_or_else(
+            || calculate_center(arrow.x, arrow.y, arrow.width, arrow.height),
+            |measurement| measurement.center,
+        );
+        let Some(center) = label_center(arrow, text.label_position, pivot) else {
             continue;
         };
         let x = center.0 - text.width / 2.0;
@@ -123,7 +129,11 @@ pub(crate) fn resolve_arrow_labels(
     resolved
 }
 
-fn label_center(arrow: &ExcalidrawElement, label_position: Option<f64>) -> Option<(f64, f64)> {
+fn label_center(
+    arrow: &ExcalidrawElement,
+    label_position: Option<f64>,
+    pivot: (f64, f64),
+) -> Option<(f64, f64)> {
     if arrow.elbowed.unwrap_or(false) && !has_renderable_elbow_geometry(arrow) {
         return None;
     }
@@ -148,9 +158,6 @@ fn label_center(arrow: &ExcalidrawElement, label_position: Option<f64>) -> Optio
         point_at_segment_fraction(&absolute, curves.as_deref(), segment, 0.5)
     };
 
-    // Match the renderer's stored-box pivot; deriving precise linear geometry
-    // pivots is intentionally independent of bound-label placement.
-    let pivot = calculate_center(arrow.x, arrow.y, arrow.width, arrow.height);
     let (sin, cos) = arrow.angle.sin_cos();
     let (dx, dy) = (center.0 - pivot.0, center.1 - pivot.1);
     Some((pivot.0 + dx * cos - dy * sin, pivot.1 + dx * sin + dy * cos))

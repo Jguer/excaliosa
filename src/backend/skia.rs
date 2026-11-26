@@ -19,7 +19,7 @@ use crate::font_utils::normalize_newlines;
 use crate::fonts::bundled_font;
 use crate::models::ExcalidrawData;
 use crate::scene::arrow_label::resolve_arrow_labels;
-use crate::scene::build::build_scene_with_labels;
+use crate::scene::build::{build_scene_with_labels, measure_linear_elements};
 use crate::scene::{
     FrameClip, ImagePrimitive, LabelGap, PaintedPath, PathOp, Primitive, Rgba, TextAlign,
     TextPrimitive,
@@ -47,8 +47,9 @@ pub fn render_to_png(
 ) -> Result<()> {
     ensure!(dpi != Some(0), "PNG DPI must be positive");
     let scale = dpi.map(|d| f64::from(d) / SOURCE_DPI).unwrap_or(1.0);
-    let arrow_labels = resolve_arrow_labels(&data.elements);
-    let vb = calculate_viewbox_with_labels(&data.elements, &arrow_labels);
+    let linear_measurements = measure_linear_elements(&data.elements);
+    let arrow_labels = resolve_arrow_labels(&data.elements, &linear_measurements);
+    let vb = calculate_viewbox_with_labels(&data.elements, &arrow_labels, &linear_measurements);
     let (width, height) = raster_size(vb.width * scale, vb.height * scale)
         .context("Invalid PNG output dimensions")?;
 
@@ -72,7 +73,13 @@ pub fn render_to_png(
             el.id
         );
     }
-    let scene = build_scene_with_labels(data, background.map(Rgba::from_tuple), vb, arrow_labels);
+    let scene = build_scene_with_labels(
+        data,
+        background.map(Rgba::from_tuple),
+        vb,
+        arrow_labels,
+        &linear_measurements,
+    );
     let mut pixmap =
         Pixmap::new(width, height).ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
 

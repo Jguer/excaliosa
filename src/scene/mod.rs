@@ -10,6 +10,7 @@ pub(crate) mod arrow_label;
 pub mod build;
 pub mod frame;
 pub(crate) mod freedraw;
+pub(crate) mod linear_geometry;
 mod static_elements;
 
 pub use build::build_scene;

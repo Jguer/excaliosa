@@ -79,7 +79,7 @@ excaliosa path/to/diagram.json -o diagram.svg
 - -o, --output <FILE>: Output file path.
 	- Default: same as input filename with a `.png` extension.
 	- The output format is inferred from the extension: `.svg` for SVG, `.png` for PNG.
-	- Both formats use the same scene for shape geometry. SVG exports text without embedding fonts; if Excalifont, Liberation Sans, or Cascadia Code is unavailable to the viewer, it may substitute a font and change text layout. PNG renders text with bundled fonts.
+	- Both formats use the same scene for shape geometry and bundled font metrics.
 	- PNG export fails if an image has missing, malformed, or unsupported data. Use base64-encoded, non-animated PNGs for embedded images.
 	- A successful export replaces the destination entry instead of writing through a symbolic or hard link. The input file and links to it are not valid destinations.
 - -b, --background <HEX>: Background color to apply to the canvas. Accepts `#RRGGBB` or `#RRGGBBAA` (alpha supported), or the literal `transparent`.
@@ -94,6 +94,12 @@ excaliosa path/to/diagram.json -o diagram.svg
 	- Lower values reduce output size (e.g. `--dpi 48` halves dimensions).
 	- PNG output is limited to 8,192 pixels per axis and 16,777,216 pixels total.
 - -h, --help: Show help and exit.
+
+### Text and fonts
+
+SVG exports embed Excalifont and Cascadia Code once per used face, with sans-serif and monospace fallbacks respectively. The complete TTF files are base64-encoded without subsetting, adding about 250 KiB for Excalifont and 959 KiB for Cascadia Code to the SVG. Liberation Sans is named with a sans-serif fallback but is not embedded: its bundled font metadata permits embedding but refers to an external license rather than containing the complete notice. Excalifont and Cascadia Code include their copyright and SIL Open Font License notices in the embedded font metadata.
+
+Both exports preserve saved lines and explicit line heights; SVG also records left-to-right or right-to-left direction and logical text anchors. PNG uses bundled fonts for simple per-character glyph outlining, but does not perform complex text shaping, bidirectional reordering, emoji fallback, or SVG-style font fallback. Unsupported printable glyphs use the selected font's notdef glyph.
 
 ### More examples
 

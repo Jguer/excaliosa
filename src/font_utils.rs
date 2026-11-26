@@ -7,6 +7,43 @@ pub fn get_font_family(font_id: Option<i32>) -> &'static str {
     }
 }
 
+/// Normalize Excalidraw's accepted newline forms without dropping empty lines.
+pub fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Resolve SVG direction from the first directional character, as upstream does.
+pub fn text_direction(text: &str) -> &'static str {
+    for ch in text.chars() {
+        if is_ltr(ch) {
+            return "ltr";
+        }
+        if is_rtl(ch) {
+            return "rtl";
+        }
+    }
+    "ltr"
+}
+
+fn is_ltr(ch: char) -> bool {
+    matches!(ch,
+        'A'..='Z' | 'a'..='z'
+        | '\u{00c0}'..='\u{00d6}' | '\u{00d8}'..='\u{00f6}'
+        | '\u{00f8}'..='\u{02b8}' | '\u{0300}'..='\u{0590}'
+        | '\u{0800}'..='\u{1fff}' | '\u{2c00}'..='\u{fb1c}'
+        | '\u{fdfe}'..='\u{fe6f}' | '\u{fefd}'..='\u{ffff}'
+        | '\u{10000}'..='\u{10ffff}'
+    )
+}
+
+fn is_rtl(ch: char) -> bool {
+    matches!(ch,
+        '\u{0591}'..='\u{07ff}'
+        | '\u{fb1d}'..='\u{fdfd}'
+        | '\u{fe70}'..='\u{fefc}'
+    )
+}
+
 /// Line height and alphabetic baseline measured from the top of a line box.
 pub(crate) fn text_metrics(family: &str, size: f64, line_height: Option<f64>) -> (f64, f64) {
     // From the bundled fonts' head/hhea tables; center the font in the line box.

@@ -4,18 +4,24 @@
 //! export matches the PNG output. Shapes are emitted as `<path>` elements (the
 //! roughr op-lists), text as `<text>`/`<tspan>`, and images as `<image>`.
 
+use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 
+use base64::Engine;
+
+use crate::font_utils::{normalize_newlines, text_direction};
+use crate::fonts::bundled_font;
 use crate::models::ExcalidrawData;
 use crate::scene::{
-    build_scene, Drawable, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign,
-    TextPrimitive,
+    Drawable, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign, TextPrimitive,
+    build_scene,
 };
 
 /// Generate an SVG document string for the given Excalidraw data.
 pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>) -> String {
     let scene = build_scene(data, background.map(Rgba::from_tuple));
     let vb = scene.viewbox;
+    let fonts = font_css(&scene.drawables);
 
     let mut body = String::new();
     if let Some(bg) = scene.background {
@@ -41,9 +47,33 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>)
     }
 
     format!(
-        "<svg viewBox=\"{} {} {} {}\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n{}</svg>",
-        vb.min_x, vb.min_y, vb.width, vb.height, body
+        "<svg viewBox=\"{} {} {} {}\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n{}{}</svg>",
+        vb.min_x, vb.min_y, vb.width, vb.height, fonts, body
     )
+}
+
+fn font_css(drawables: &[Drawable]) -> String {
+    let used: BTreeSet<&str> = drawables
+        .iter()
+        .filter_map(|drawable| match &drawable.primitive {
+            Primitive::Text(text) => Some(text.font_family),
+            _ => None,
+        })
+        .filter(|family| bundled_font(family).embed_in_svg)
+        .collect();
+    if used.is_empty() {
+        return String::new();
+    }
+
+    let mut css = String::from("  <defs>\n    <style class=\"style-fonts\">\n");
+    for family in used {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bundled_font(family).bytes);
+        css.push_str(&format!(
+            "      @font-face {{ font-family: \"{family}\"; src: url(\"data:font/ttf;base64,{encoded}\") format(\"truetype\"); }}\n"
+        ));
+    }
+    css.push_str("    </style>\n  </defs>\n");
+    css
 }
 
 fn render_drawable(drawable: &Drawable) -> String {
@@ -200,14 +230,15 @@ fn path_svg(pp: &PaintedPath) -> String {
 }
 
 fn text_svg(t: &TextPrimitive) -> String {
+    let direction = text_direction(&t.content);
     let (anchor, anchor_x) = match t.align {
-        TextAlign::Left => ("start", t.x),
+        TextAlign::Left => (if direction == "rtl" { "end" } else { "start" }, t.x),
         TextAlign::Center => ("middle", t.x + t.container_width / 2.0),
         TextAlign::Right => ("end", t.x + t.container_width),
     };
 
-    let tspans: String = t
-        .content
+    let content = normalize_newlines(&t.content);
+    let tspans: String = content
         .split('\n')
         .enumerate()
         .map(|(i, line)| {
@@ -218,14 +249,17 @@ fn text_svg(t: &TextPrimitive) -> String {
             )
         })
         .collect();
+    let font = bundled_font(t.font_family);
 
     format!(
-        "<text font-size=\"{}\" font-family=\"{}\" fill=\"{}\" fill-opacity=\"{:.4}\" text-anchor=\"{}\" dominant-baseline=\"alphabetic\">{}</text>",
+        "<text font-size=\"{}\" font-family=\"{}, {}\" fill=\"{}\" fill-opacity=\"{:.4}\" text-anchor=\"{}\" direction=\"{}\" dominant-baseline=\"alphabetic\">{}</text>",
         t.font_size,
         t.font_family,
+        font.generic_family,
         hex(t.color),
         t.color.3 as f64 / 255.0,
         anchor,
+        direction,
         tspans
     )
 }

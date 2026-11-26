@@ -15,7 +15,8 @@ use tiny_skia::{
     Pixmap, PixmapPaint, Rect, Stroke, StrokeDash, Transform,
 };
 
-use crate::fonts::{CASCADIA_CODE, EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR};
+use crate::font_utils::normalize_newlines;
+use crate::fonts::bundled_font;
 use crate::models::ExcalidrawData;
 use crate::scene::{
     ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign, TextPrimitive, build_scene,
@@ -180,7 +181,7 @@ fn build_path(ops: &[PathOp]) -> Option<SkPath> {
 // ---------------------------------------------------------------------------
 
 fn draw_text(pixmap: &mut Pixmap, text: &TextPrimitive, transform: Transform, opacity: f64) {
-    let Ok(font) = ReadFontsRef::new(font_bytes(text.font_family)) else {
+    let Ok(font) = ReadFontsRef::new(bundled_font(text.font_family).bytes) else {
         return;
     };
     let outlines = font.outline_glyphs();
@@ -201,7 +202,8 @@ fn draw_text(pixmap: &mut Pixmap, text: &TextPrimitive, transform: Transform, op
     paint.set_color_rgba8(r, g, b, a);
     paint.anti_alias = true;
 
-    for (i, line) in text.content.split('\n').enumerate() {
+    let content = normalize_newlines(&text.content);
+    for (i, line) in content.split('\n').enumerate() {
         let baseline_y = (text.y + text.baseline_offset + i as f64 * text.line_height) as f32;
 
         let line_width: f32 = line
@@ -231,14 +233,6 @@ fn draw_text(pixmap: &mut Pixmap, text: &TextPrimitive, transform: Transform, op
                 }
             }
         }
-    }
-}
-
-fn font_bytes(family: &str) -> &'static [u8] {
-    match family {
-        "Liberation Sans" => LIBERATION_SANS_REGULAR,
-        "Cascadia Code" => CASCADIA_CODE,
-        _ => EXCALIFONT_REGULAR,
     }
 }
 
@@ -518,7 +512,7 @@ mod tests {
         };
         for family in ["Excalifont", "Liberation Sans", "Cascadia Code"] {
             text.font_family = family;
-            let font = ReadFontsRef::new(font_bytes(family)).unwrap();
+            let font = ReadFontsRef::new(bundled_font(family).bytes).unwrap();
             assert!(font.charmap().map('\u{10fffd}').is_none());
             let mut pixmap = Pixmap::new(40, 40).unwrap();
             draw_text(&mut pixmap, &text, Transform::identity(), 1.0);

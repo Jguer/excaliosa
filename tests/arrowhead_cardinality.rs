@@ -1,7 +1,7 @@
 use excaliosa::arrow_utils::{
     calc_arrowhead_points, calc_arrowhead_points_at_size, resolve_arrowhead_size, rotate_point,
 };
-use excaliosa::models::ArrowheadField;
+use excaliosa::models::{ArrowheadField, RoundnessType};
 use excaliosa::scene::{PaintedPath, Primitive, Rgba};
 use excaliosa::{ExcalidrawData, ExcalidrawElement, build_scene};
 use serde_json::json;
@@ -128,14 +128,33 @@ fn omitted_modern_fields_fall_back_but_null_suppresses_caps() {
         ArrowheadField::Null
     ));
 
-    let scene = build_scene(&data, None);
-    let cap_counts = scene.drawables.iter().map(|drawable| {
-        let Primitive::Paths(paths) = &drawable.primitive else {
-            panic!("expected paths");
-        };
-        paths.len() - 1
-    });
-    assert_eq!(cap_counts.collect::<Vec<_>>(), [2, 0, 1, 0, 1]);
+    let cap_counts = |data: &ExcalidrawData| {
+        let scene = build_scene(data, None);
+        scene
+            .drawables
+            .iter()
+            .map(|drawable| {
+                let Primitive::Paths(paths) = &drawable.primitive else {
+                    panic!("expected paths");
+                };
+                paths.len() - 1
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = [2, 0, 1, 0, 1];
+    assert_eq!(cap_counts(&data), expected);
+
+    let serialized = serde_json::to_value(&data).unwrap();
+    for field in ["startArrowhead", "endArrowhead"] {
+        assert!(serialized["elements"][0].get(field).is_none());
+        assert!(
+            serialized["elements"][1]
+                .get(field)
+                .is_some_and(serde_json::Value::is_null)
+        );
+    }
+    let round_trip: ExcalidrawData = serde_json::from_value(serialized).unwrap();
+    assert_eq!(cap_counts(&round_trip), expected);
 }
 
 #[test]
@@ -175,6 +194,9 @@ fn short_arrows_open_up_and_wide_strokes_do_not_inflate_caps() {
     let expected = rotate_point(100.0 - size, 0.0, 100.0, 0.0, -30.0_f64.to_radians());
     assert_close(short[2], expected.0);
     assert_close(short[3], expected.1);
+
+    let bar = calc_arrowhead_points(0.0, 0.0, 100.0, 0.0, "bar", 1.0, 100.0);
+    assert_eq!(bar, [100.0, 15.0, 100.0, -15.0]);
 
     let wide: Vec<f64> = calc_arrowhead_points(0.0, 0.0, 100.0, 0.0, "arrow", 10.0, 100.0);
     assert_close((wide[2] - 100.0).hypot(wide[3]), 25.0);
@@ -252,7 +274,7 @@ fn hollow_fill_uses_scene_background_without_painting_the_page() {
     element.end_arrowhead = ArrowheadField::Named("triangle_outline".into());
     let mut data = wrap(vec![element]);
     data.app_state
-        .insert("viewBackgroundColor".into(), json!("#102030"));
+        .insert("viewBackgroundColor".into(), json!("#123"));
     let scene = build_scene(&data, None);
     assert_eq!(scene.background, None);
     let Primitive::Paths(paths) = &scene.drawables[0].primitive else {
@@ -261,7 +283,7 @@ fn hollow_fill_uses_scene_background_without_painting_the_page() {
     assert!(
         paths
             .iter()
-            .any(|path| path.fill == Some(Rgba(16, 32, 48, 255)))
+            .any(|path| path.fill == Some(Rgba(17, 34, 51, 255)))
     );
 
     let scene = build_scene(&data, Some(Rgba(0, 0, 0, 0)));
@@ -281,6 +303,41 @@ fn hollow_fill_uses_scene_background_without_painting_the_page() {
             .iter()
             .any(|path| path.fill == Some(Rgba(255, 255, 255, 255)))
     );
+}
+
+#[test]
+fn transparent_strokes_do_not_paint_hollow_caps() {
+    let rectangle = ExcalidrawElement {
+        element_type: "rectangle".into(),
+        width: 100.0,
+        height: 100.0,
+        background_color: "#ff0000".into(),
+        fill_style: "solid".into(),
+        roughness: 0.0,
+        ..Default::default()
+    };
+    let mut element = arrow();
+    element.stroke_color = "#00000000".into();
+    element.end_arrowhead = ArrowheadField::Named("circle_outline".into());
+    let scene = build_scene(&wrap(vec![rectangle, element]), None);
+    let Primitive::Paths(paths) = &scene.drawables[1].primitive else {
+        panic!("expected paths");
+    };
+    assert_eq!(paths.len(), 1);
+    assert!(paths.iter().all(|path| path.fill.is_none()));
+}
+
+#[test]
+fn zero_sized_curved_caps_are_omitted() {
+    let mut element = arrow();
+    element.points = Some(vec![(0.0, 0.0), (100.0, 0.0), (100.0, 0.0)]);
+    element.roundness = Some(RoundnessType {
+        roundness_type: 2,
+        value: None,
+    });
+    element.stroke_width = 4.0;
+    element.end_arrowhead = ArrowheadField::Named("cardinality_zero_or_one".into());
+    assert!(cap_paths(element).is_empty());
 }
 
 #[test]

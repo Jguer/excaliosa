@@ -18,7 +18,7 @@ use crate::arrow_utils::{
     calc_arrowhead_points_at_size, calculate_arrowhead_direction, normalize_arrowhead,
     resolve_arrowhead_size,
 };
-use crate::color_utils::{fill_color, has_stroke, parse_color, parse_color_result};
+use crate::color_utils::{fill_color, has_stroke, parse_color, parse_hex_color};
 use crate::font_utils::{get_font_family, text_metrics};
 use crate::math_utils::calculate_center;
 use crate::models::{ArrowheadField, ExcalidrawData, ExcalidrawElement, ViewBox};
@@ -59,7 +59,7 @@ pub(crate) fn build_scene_with_labels(
             data.app_state
                 .get("viewBackgroundColor")
                 .and_then(Value::as_str)
-                .and_then(|color| parse_color_result(color).ok())
+                .and_then(|color| parse_hex_color(color, true).ok())
                 .map(Rgba::from_tuple)
         })
         .unwrap_or(Rgba(255, 255, 255, 255));
@@ -360,7 +360,7 @@ fn build_line(
 
     // Caps share the element seed but apply their own roughness and dash rules.
     if el.element_type == "arrow" {
-        if let Some(s) = stroke {
+        if let Some(s) = stroke.filter(|stroke| stroke.3 > 0) {
             out.extend(arrowhead_paths(
                 generator,
                 el,
@@ -433,6 +433,9 @@ fn arrowhead_paths(
             curved,
             elbowed,
         );
+        if size == 0.0 {
+            return vec![];
+        }
         let vals = calc_arrowhead_points_at_size(
             tail_x,
             tail_y,

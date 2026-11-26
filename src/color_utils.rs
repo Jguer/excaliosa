@@ -24,7 +24,10 @@ pub fn parse_color_result(color_str: &str) -> Result<(u8, u8, u8, u8), String> {
     parse_hex_color(color_str, false)
 }
 
-fn parse_hex_color(color_str: &str, allow_shorthand: bool) -> Result<(u8, u8, u8, u8), String> {
+pub(crate) fn parse_hex_color(
+    color_str: &str,
+    allow_shorthand: bool,
+) -> Result<(u8, u8, u8, u8), String> {
     if color_str.eq_ignore_ascii_case("transparent") {
         return Ok((0, 0, 0, 0));
     }

@@ -48,6 +48,12 @@ pub enum ArrowheadField {
     Named(String),
 }
 
+impl ArrowheadField {
+    fn is_omitted(&self) -> bool {
+        matches!(self, Self::Omitted)
+    }
+}
+
 impl Serialize for ArrowheadField {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -113,7 +119,9 @@ pub struct ExcalidrawElement {
     pub end_binding: Option<Binding>,
     pub start_arrow_type: Option<String>,
     pub end_arrow_type: Option<String>,
+    #[serde(skip_serializing_if = "ArrowheadField::is_omitted")]
     pub start_arrowhead: ArrowheadField,
+    #[serde(skip_serializing_if = "ArrowheadField::is_omitted")]
     pub end_arrowhead: ArrowheadField,
     pub points: Option<Vec<(f64, f64)>>,
     pub last_committed_point: Option<Vec<f64>>,

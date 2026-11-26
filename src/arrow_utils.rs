@@ -249,7 +249,7 @@ where
     let size = T::from(get_arrowhead_size(arrowhead))
         .unwrap()
         .min((segment_length * fraction).max(T::zero()));
-    calc_arrowhead_points_at_size(
+    let points = calc_arrowhead_points_at_size(
         x_tail,
         y_tail,
         x_tip,
@@ -258,7 +258,12 @@ where
         stroke_width,
         size,
         T::zero(),
-    )
+    );
+    if normalize_arrowhead(arrowhead) == "bar" && points.len() == 6 {
+        points[2..].to_vec()
+    } else {
+        points
+    }
 }
 
 /// Calculate arrowhead points at a resolved size and fractional tip offset.

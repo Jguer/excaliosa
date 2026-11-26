@@ -1,0 +1,123 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "excaliosa-image-reuse-test",
+  "elements": [
+    {
+      "id": "reuse-frame",
+      "type": "frame",
+      "x": 360,
+      "y": 20,
+      "width": 180,
+      "height": 180,
+      "name": "Image reuse",
+      "opacity": 100,
+      "isDeleted": false
+    },
+    {
+      "id": "original",
+      "type": "image",
+      "x": 40,
+      "y": 40,
+      "width": 120,
+      "height": 60,
+      "angle": 0,
+      "fileId": "asset\"><&'# ",
+      "scale": [1, 1],
+      "crop": null,
+      "opacity": 100,
+      "isDeleted": false
+    },
+    {
+      "id": "cropped",
+      "type": "image",
+      "x": 200,
+      "y": 40,
+      "width": 60,
+      "height": 60,
+      "angle": 0,
+      "fileId": "asset\"><&'# ",
+      "scale": [1, 1],
+      "crop": {
+        "x": 1,
+        "y": 0,
+        "width": 2,
+        "height": 2,
+        "naturalWidth": 4,
+        "naturalHeight": 2
+      },
+      "opacity": 100,
+      "isDeleted": false
+    },
+    {
+      "id": "flipped",
+      "type": "image",
+      "x": 40,
+      "y": 140,
+      "width": 120,
+      "height": 60,
+      "angle": 0,
+      "fileId": "asset\"><&'# ",
+      "scale": [-1, 1],
+      "crop": null,
+      "opacity": 100,
+      "isDeleted": false
+    },
+    {
+      "id": "rotated-framed",
+      "type": "image",
+      "x": 400,
+      "y": 60,
+      "width": 80,
+      "height": 80,
+      "angle": 0.35,
+      "frameId": "reuse-frame",
+      "fileId": "asset\"><&'# ",
+      "scale": [1, -1],
+      "crop": {
+        "x": 0,
+        "y": 0,
+        "width": 2,
+        "height": 2,
+        "naturalWidth": 4,
+        "naturalHeight": 2
+      },
+      "roundness": { "type": 2, "value": null },
+      "link": "https://example.com/image",
+      "opacity": 75,
+      "isDeleted": false
+    },
+    {
+      "id": "second-asset",
+      "type": "image",
+      "x": 200,
+      "y": 150,
+      "width": 80,
+      "height": 40,
+      "angle": 0,
+      "fileId": "second",
+      "scale": [1, 1],
+      "crop": null,
+      "opacity": 100,
+      "isDeleted": false
+    }
+  ],
+  "appState": {},
+  "files": {
+    "asset\"><&'# ": {
+      "id": "asset\"><&'# ",
+      "dataURL": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAAB/qH1jAAAAGklEQVR4nGP4z8DwHwwZ/v//j0SDAQMDw38AP/AT7fF3SY0AAAAASUVORK5CYII=",
+      "mimeType": "image/png"
+    },
+    "second": {
+      "id": "second",
+      "dataURL": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGOQS/nwH4QZYAwAUZgJxZooHygAAAAASUVORK5CYII=",
+      "mimeType": "image/png"
+    },
+    "unused": {
+      "id": "unused",
+      "dataURL": "data:image/png;base64,dW51c2Vk",
+      "mimeType": "image/png"
+    }
+  }
+}

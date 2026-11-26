@@ -1,21 +1,23 @@
 /// Color parsing and element color/stroke detection utilities
 use crate::models::ExcalidrawElement;
 
-/// Parse a hex color string into RGBA components
-/// Accepts:
-/// - "transparent" => (0, 0, 0, 0)
-/// - #RGB or #RGBA => each digit is doubled
-/// - #RRGGBB or RRGGBB => (r, g, b, 255)
-/// - #RRGGBBAA or RRGGBBAA => (r, g, b, a)
-/// - Empty string => (0, 0, 0, 0)
-/// - Invalid format => (0, 0, 0, 255) - defaults to black
+/// Parse a scene paint color into RGBA, defaulting malformed input to black.
+/// Accepts CSS/SVG color names, hex colors with optional alpha, and
+/// "transparent". An empty string remains fully transparent.
 pub fn parse_color(color_str: &str) -> (u8, u8, u8, u8) {
-    // Empty means "no color" (fully transparent); anything else defers to the
-    // fallible parser, defaulting to opaque black on malformed input.
     if color_str.is_empty() {
         return (0, 0, 0, 0);
     }
-    parse_hex_color(color_str, true).unwrap_or((0, 0, 0, 255))
+    parse_scene_color(color_str).unwrap_or((0, 0, 0, 255))
+}
+
+pub(crate) fn parse_scene_color(color_str: &str) -> Result<(u8, u8, u8, u8), String> {
+    let trimmed = color_str.trim();
+    parse_hex_color(trimmed, true).or_else(|_| {
+        palette::named::from_str(&trimmed.to_ascii_lowercase())
+            .map(|color| (color.red, color.green, color.blue, 255))
+            .ok_or_else(|| format!("Invalid scene paint color: {trimmed}"))
+    })
 }
 
 /// Parse a hex color string into RGBA with Result type (for error handling)
@@ -24,7 +26,10 @@ pub fn parse_color_result(color_str: &str) -> Result<(u8, u8, u8, u8), String> {
     parse_hex_color(color_str, false)
 }
 
-fn parse_hex_color(color_str: &str, allow_shorthand: bool) -> Result<(u8, u8, u8, u8), String> {
+pub(crate) fn parse_hex_color(
+    color_str: &str,
+    allow_shorthand: bool,
+) -> Result<(u8, u8, u8, u8), String> {
     if color_str.eq_ignore_ascii_case("transparent") {
         return Ok((0, 0, 0, 0));
     }
@@ -81,7 +86,7 @@ pub fn has_fill(element: &ExcalidrawElement) -> bool {
 }
 
 pub(crate) fn fill_color(element: &ExcalidrawElement) -> Option<(u8, u8, u8, u8)> {
-    parse_hex_color(&element.background_color, true)
+    parse_scene_color(&element.background_color)
         .ok()
         .filter(|color| color.3 > 0)
 }

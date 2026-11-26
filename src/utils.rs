@@ -1,5 +1,9 @@
 use crate::models::{ExcalidrawElement, ViewBox};
+use crate::scene::arrow_label::{ResolvedArrowLabel, resolve_arrow_labels};
+use crate::scene::build::measure_linear_elements;
+use crate::scene::linear_geometry::LinearMeasurements;
 use anyhow::{Context, Result, bail, ensure};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufWriter, ErrorKind, Write};
 use std::path::Path;
@@ -129,51 +133,167 @@ mod output_tests {
 }
 
 pub(crate) fn contributes_bounds(element_type: &str) -> bool {
-    // Frames still reserve space even though we don't paint their borders.
     matches!(
         element_type,
-        "frame" | "magicframe" | "rectangle" | "ellipse" | "diamond" | "line" | "arrow" | "text" | "image"
+        "frame"
+            | "magicframe"
+            | "rectangle"
+            | "ellipse"
+            | "diamond"
+            | "line"
+            | "arrow"
+            | "freedraw"
+            | "text"
+            | "image"
+            | "stickynote"
+            | "iframe"
+            | "embeddable"
     )
 }
 
 /// Calculate the viewbox for non-deleted supported elements and frames.
 pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
+    let linear_measurements = measure_linear_elements(elements);
+    let arrow_labels = resolve_arrow_labels(elements, &linear_measurements);
+    calculate_viewbox_with_labels(elements, &arrow_labels, &linear_measurements)
+}
+
+pub(crate) fn calculate_viewbox_with_labels(
+    elements: &[ExcalidrawElement],
+    arrow_labels: &HashMap<usize, ResolvedArrowLabel>,
+    linear_measurements: &LinearMeasurements,
+) -> ViewBox {
     const PADDING: f64 = 40.0;
 
+    let bound_text: std::collections::HashSet<usize> = arrow_labels
+        .values()
+        .map(|label| label.text_index)
+        .collect();
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut max_y = f64::NEG_INFINITY;
 
-    for el in elements {
-        if el.is_deleted || !contributes_bounds(&el.element_type) {
+    for (index, el) in elements.iter().enumerate() {
+        if el.is_deleted || bound_text.contains(&index) || !contributes_bounds(&el.element_type) {
             continue;
         }
-        // Linear points can extend left or above their origin. Keep the same
-        // stored-box rotation pivot as the renderer, regardless of the bounds.
-        let (cx, cy) = crate::math_utils::calculate_center(el.x, el.y, el.width, el.height);
+        let (cx, cy) = if el.element_type == "freedraw" {
+            crate::scene::freedraw::point_center(el).unwrap_or_else(|| {
+                crate::math_utils::calculate_center(el.x, el.y, el.width, el.height)
+            })
+        } else {
+            crate::math_utils::calculate_center(el.x, el.y, el.width, el.height)
+        };
         let (sin, cos) = el.angle.sin_cos();
-        let mut include = |px: f64, py: f64| {
-            let (dx, dy) = (px - cx, py - cy);
-            let rx = cx + dx * cos - dy * sin;
-            let ry = cy + dx * sin + dy * cos;
+        let mut include_rotated = |rx: f64, ry: f64| {
             min_x = min_x.min(rx);
             min_y = min_y.min(ry);
             max_x = max_x.max(rx);
             max_y = max_y.max(ry);
         };
+        macro_rules! include {
+            ($px:expr, $py:expr $(,)?) => {{
+                let (px, py) = ($px, $py);
+                let (dx, dy) = (px - cx, py - cy);
+                include_rotated(cx + dx * cos - dy * sin, cy + dx * sin + dy * cos);
+            }};
+        }
         match (el.element_type.as_str(), el.points.as_deref()) {
-            ("line" | "arrow", Some(points)) if !points.is_empty() => {
-                // shortcut: padding covers normal overshoot; use painted paths for exact bounds.
-                for &(x, y) in points {
-                    include(el.x + x, el.y + y);
+            ("freedraw", _) => {
+                if el.opacity > 0.0
+                    && let Some(paths) = crate::scene::freedraw::build_freedraw(
+                        &roughr::generator::Generator::default(),
+                        el,
+                    )
+                {
+                    for op in paths.iter().flat_map(|path| &path.ops) {
+                        match *op {
+                            crate::scene::PathOp::Move(x, y) | crate::scene::PathOp::Line(x, y) => {
+                                include!(x, y)
+                            }
+                            crate::scene::PathOp::Cubic(x1, y1, x2, y2, x, y) => {
+                                include!(x1, y1);
+                                include!(x2, y2);
+                                include!(x, y);
+                            }
+                            crate::scene::PathOp::Close => {}
+                        }
+                    }
                 }
             }
+            ("line" | "arrow", points) => {
+                if let Some(measurement) = linear_measurements.get(&index) {
+                    let bounds = measurement.rotated_bounds;
+                    include_rotated(bounds.min_x, bounds.min_y);
+                    include_rotated(bounds.max_x, bounds.max_y);
+                } else if let Some(points) = points {
+                    for &(x, y) in points {
+                        include!(el.x + x, el.y + y);
+                    }
+                }
+                if let Some(label) = arrow_labels.get(&index) {
+                    let text = &elements[label.text_index];
+                    let (label_cx, label_cy) = crate::math_utils::calculate_center(
+                        label.x,
+                        label.y,
+                        text.width,
+                        text.height,
+                    );
+                    let (label_sin, label_cos) = text.angle.sin_cos();
+                    for (px, py) in [
+                        (label.x, label.y),
+                        (label.x + text.width, label.y),
+                        (label.x + text.width, label.y + text.height),
+                        (label.x, label.y + text.height),
+                    ] {
+                        let (dx, dy) = (px - label_cx, py - label_cy);
+                        include_rotated(
+                            label_cx + dx * label_cos - dy * label_sin,
+                            label_cy + dx * label_sin + dy * label_cos,
+                        );
+                    }
+                }
+            }
+            ("diamond", _) => {
+                include!(el.x + el.width / 2.0, el.y);
+                include!(el.x + el.width, el.y + el.height / 2.0);
+                include!(el.x + el.width / 2.0, el.y + el.height);
+                include!(el.x, el.y + el.height / 2.0);
+            }
+            ("ellipse", _) => {
+                let rx = el.width.abs() / 2.0;
+                let ry = el.height.abs() / 2.0;
+                let half_width = (rx * cos).hypot(ry * sin);
+                let half_height = (rx * sin).hypot(ry * cos);
+                include_rotated(cx - half_width, cy - half_height);
+                include_rotated(cx + half_width, cy + half_height);
+            }
             _ => {
-                include(el.x, el.y);
-                include(el.x + el.width, el.y);
-                include(el.x + el.width, el.y + el.height);
-                include(el.x, el.y + el.height);
+                include!(el.x, el.y);
+                include!(el.x + el.width, el.y);
+                include!(el.x + el.width, el.y + el.height);
+                include!(el.x, el.y + el.height);
+                if el.element_type == "stickynote" {
+                    const SHADOW_OFFSET: f64 = 3.0;
+                    include!(el.x + SHADOW_OFFSET, el.y + SHADOW_OFFSET);
+                    include!(el.x + el.width + SHADOW_OFFSET, el.y + SHADOW_OFFSET);
+                    include!(
+                        el.x + el.width + SHADOW_OFFSET,
+                        el.y + el.height + SHADOW_OFFSET,
+                    );
+                    include!(el.x + SHADOW_OFFSET, el.y + el.height + SHADOW_OFFSET);
+                }
+            }
+        }
+        if matches!(el.element_type.as_str(), "frame" | "magicframe") {
+            // Synthesized frame names stay horizontal and above the saved box.
+            if let Some(title) = crate::scene::frame::frame_title(el) {
+                let lines = title.content.split('\n').count() as f64;
+                min_x = min_x.min(title.x);
+                min_y = min_y.min(title.y);
+                max_x = max_x.max(title.x + title.container_width);
+                max_y = max_y.max(title.y + title.line_height * lines);
             }
         }
     }

@@ -14,10 +14,9 @@ pub fn get_stroke_dash_array(stroke_style: &str, stroke_width: f64) -> Option<Ve
     }
 }
 
-/// Dotted dash pattern for arrow caps uses strokeWidth-1
+/// Dotted line caps use a tighter gap than the dotted shaft.
 pub fn get_dotted_cap_dash_array(stroke_width: f64) -> Vec<f64> {
-    let adj = (stroke_width - 1.0).max(0.0);
-    vec![1.5, 6.0 + adj]
+    vec![1.5, 4.0 + stroke_width]
 }
 
 /// Get stroke dash array as SVG attribute value (e.g., "8,12")

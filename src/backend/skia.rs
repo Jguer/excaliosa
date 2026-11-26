@@ -11,16 +11,20 @@ use skrifa::{
     raw::FontRef as ReadFontsRef,
 };
 use tiny_skia::{
-    ColorU8, FillRule, FilterQuality, LineCap, LineJoin, Paint, Path as SkPath, PathBuilder,
+    ColorU8, FillRule, FilterQuality, LineCap, LineJoin, Mask, Paint, Path as SkPath, PathBuilder,
     Pixmap, PixmapPaint, Rect, Stroke, StrokeDash, Transform,
 };
 
-use crate::fonts::{CASCADIA_CODE, EXCALIFONT_REGULAR, LIBERATION_SANS_REGULAR};
+use crate::font_utils::normalize_newlines;
+use crate::fonts::{BUNDLED_FONT_FALLBACK_ORDER, bundled_font};
 use crate::models::ExcalidrawData;
+use crate::scene::arrow_label::resolve_arrow_labels;
+use crate::scene::build::{build_scene_with_labels, measure_linear_elements};
 use crate::scene::{
-    ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign, TextPrimitive, build_scene,
+    FrameClip, ImagePrimitive, LabelGap, PaintedPath, PathCompositing, PathOp, Primitive, Rgba,
+    TextAlign, TextPrimitive,
 };
-use crate::utils::{calculate_viewbox, save_png_with_quality};
+use crate::utils::{calculate_viewbox_with_labels, save_png_with_quality};
 
 const SOURCE_DPI: f64 = 96.0;
 const MAX_RASTER_AXIS: f64 = 8192.0;
@@ -43,7 +47,9 @@ pub fn render_to_png(
 ) -> Result<()> {
     ensure!(dpi != Some(0), "PNG DPI must be positive");
     let scale = dpi.map(|d| f64::from(d) / SOURCE_DPI).unwrap_or(1.0);
-    let vb = calculate_viewbox(&data.elements);
+    let linear_measurements = measure_linear_elements(&data.elements);
+    let arrow_labels = resolve_arrow_labels(&data.elements, &linear_measurements);
+    let vb = calculate_viewbox_with_labels(&data.elements, &arrow_labels, &linear_measurements);
     let (width, height) = raster_size(vb.width * scale, vb.height * scale)
         .context("Invalid PNG output dimensions")?;
 
@@ -67,8 +73,13 @@ pub fn render_to_png(
             el.id
         );
     }
-    let scene = build_scene(data, background.map(Rgba::from_tuple));
-
+    let scene = build_scene_with_labels(
+        data,
+        background.map(Rgba::from_tuple),
+        vb,
+        arrow_labels,
+        &linear_measurements,
+    );
     let mut pixmap =
         Pixmap::new(width, height).ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
 
@@ -87,6 +98,7 @@ pub fn render_to_png(
     let base = Transform::from_scale(scale as f32, scale as f32)
         .pre_translate(-vb.min_x as f32, -vb.min_y as f32);
 
+    let mut cached_mask: Option<(&FrameClip, Mask)> = None;
     for drawable in &scene.drawables {
         let tf = if drawable.rotation_deg != 0.0 {
             base.pre_concat(Transform::from_rotate_at(
@@ -98,14 +110,37 @@ pub fn render_to_png(
             base
         };
 
+        let frame_mask = if let Some(clip) = drawable.frame_clip.as_ref() {
+            if cached_mask
+                .as_ref()
+                .is_none_or(|(cached, _)| *cached != clip)
+            {
+                cached_mask = build_frame_mask(width, height, base, clip).map(|mask| (clip, mask));
+            }
+            cached_mask.as_ref().map(|(_, mask)| mask)
+        } else {
+            None
+        };
+        let mut label_mask = drawable
+            .label_gap
+            .and_then(|gap| arrow_label_mask(gap, base, width, height));
+        if let (Some(label_mask), Some(frame_mask)) = (label_mask.as_mut(), frame_mask) {
+            for (label_alpha, frame_alpha) in
+                label_mask.data_mut().iter_mut().zip(frame_mask.data())
+            {
+                *label_alpha = (u16::from(*label_alpha) * u16::from(*frame_alpha) / 255) as u8;
+            }
+        }
+        let mask = label_mask.as_ref().or(frame_mask);
         match &drawable.primitive {
-            Primitive::Paths(paths) => {
-                for pp in paths {
-                    draw_painted(&mut pixmap, pp, tf, drawable.opacity);
+            Primitive::Paths(paths) if drawable.path_compositing == PathCompositing::PerPaint => {
+                for path in paths {
+                    draw_painted(&mut pixmap, path, tf, drawable.opacity, mask);
                 }
             }
-            Primitive::Text(text) => draw_text(&mut pixmap, text, tf, drawable.opacity),
-            Primitive::Image(image) => draw_image(&mut pixmap, image, tf, drawable.opacity)
+            Primitive::Paths(paths) => draw_paths(&mut pixmap, paths, tf, drawable.opacity, mask),
+            Primitive::Text(text) => draw_text(&mut pixmap, text, tf, drawable.opacity, mask),
+            Primitive::Image(image) => draw_image(&mut pixmap, image, tf, drawable.opacity, mask)
                 .context("Failed to render embedded PNG image")?,
         }
     }
@@ -118,7 +153,92 @@ pub fn render_to_png(
 // Paths
 // ---------------------------------------------------------------------------
 
-fn draw_painted(pixmap: &mut Pixmap, pp: &PaintedPath, transform: Transform, opacity: f64) {
+fn draw_paths(
+    pixmap: &mut Pixmap,
+    paths: &[PaintedPath],
+    transform: Transform,
+    opacity: f64,
+    mask: Option<&Mask>,
+) {
+    if opacity <= 0.0 {
+        return;
+    }
+    if opacity >= 1.0 {
+        for path in paths {
+            draw_painted(pixmap, path, transform, 1.0, mask);
+        }
+        return;
+    }
+
+    // Composite overlapping paths before applying element opacity, as SVG groups do.
+    let mut bounds: Option<Rect> = None;
+    for pp in paths {
+        let Some(path) = build_path(&pp.ops) else {
+            continue;
+        };
+        let padding = if pp.stroke.is_some() && pp.stroke_width > 0.0 {
+            pp.stroke_width as f32 / 2.0 + 1.0
+        } else {
+            1.0
+        };
+        let Some(path_bounds) = path.bounds().outset(padding, padding) else {
+            continue;
+        };
+        let Some(path_bounds) = path_bounds.transform(transform) else {
+            continue;
+        };
+        bounds = Some(match bounds {
+            Some(current) => Rect::from_ltrb(
+                current.left().min(path_bounds.left()),
+                current.top().min(path_bounds.top()),
+                current.right().max(path_bounds.right()),
+                current.bottom().max(path_bounds.bottom()),
+            )
+            .unwrap_or(current),
+            None => path_bounds,
+        });
+    }
+    let Some(bounds) = bounds else {
+        return;
+    };
+    let left = bounds.left().floor().max(0.0) as i32;
+    let top = bounds.top().floor().max(0.0) as i32;
+    let right = bounds.right().ceil().min(pixmap.width() as f32) as i32;
+    let bottom = bounds.bottom().ceil().min(pixmap.height() as f32) as i32;
+    if left >= right || top >= bottom {
+        return;
+    }
+    let Some(mut layer) = Pixmap::new((right - left) as u32, (bottom - top) as u32) else {
+        return;
+    };
+    let layer_transform = transform.post_translate(-left as f32, -top as f32);
+    for path in paths {
+        draw_painted(&mut layer, path, layer_transform, 1.0, None);
+    }
+    let paint = PixmapPaint {
+        opacity: opacity as f32,
+        ..PixmapPaint::default()
+    };
+    pixmap.draw_pixmap(
+        left,
+        top,
+        layer.as_ref(),
+        &paint,
+        Transform::identity(),
+        mask,
+    );
+}
+
+fn draw_painted(
+    pixmap: &mut Pixmap,
+    pp: &PaintedPath,
+    transform: Transform,
+    opacity: f64,
+    mask: Option<&Mask>,
+) {
+    if opacity <= 0.0 {
+        return;
+    }
     let Some(path) = build_path(&pp.ops) else {
         return;
     };
@@ -134,7 +254,7 @@ fn draw_painted(pixmap: &mut Pixmap, pp: &PaintedPath, transform: Transform, opa
             } else {
                 FillRule::Winding
             };
-            pixmap.fill_path(&path, &paint, rule, transform, None);
+            pixmap.fill_path(&path, &paint, rule, transform, mask);
         }
     }
 
@@ -155,9 +275,22 @@ fn draw_painted(pixmap: &mut Pixmap, pp: &PaintedPath, transform: Transform, opa
                 let pattern: Vec<f32> = dash.iter().map(|v| *v as f32).collect();
                 sk.dash = StrokeDash::new(pattern, 0.0);
             }
-            pixmap.stroke_path(&path, &paint, &sk, transform, None);
+            pixmap.stroke_path(&path, &paint, &sk, transform, mask);
         }
     }
+}
+
+fn arrow_label_mask(gap: LabelGap, base: Transform, width: u32, height: u32) -> Option<Mask> {
+    let rect = Rect::from_xywh(
+        gap.x as f32,
+        gap.y as f32,
+        gap.width as f32,
+        gap.height as f32,
+    )?;
+    let mut mask = Mask::new(width, height)?;
+    mask.fill_path(&PathBuilder::from_rect(rect), FillRule::Winding, true, base);
+    mask.invert();
+    Some(mask)
 }
 
 fn build_path(ops: &[PathOp]) -> Option<SkPath> {
@@ -179,19 +312,52 @@ fn build_path(ops: &[PathOp]) -> Option<SkPath> {
 // Text (skrifa glyph outlining)
 // ---------------------------------------------------------------------------
 
-fn draw_text(pixmap: &mut Pixmap, text: &TextPrimitive, transform: Transform, opacity: f64) {
-    let Ok(font) = ReadFontsRef::new(font_bytes(text.font_family)) else {
+fn draw_text(
+    pixmap: &mut Pixmap,
+    text: &TextPrimitive,
+    transform: Transform,
+    opacity: f64,
+    mask: Option<&Mask>,
+) {
+    let Ok(primary) = ReadFontsRef::new(bundled_font(text.font_family).bytes) else {
         return;
     };
-    let outlines = font.outline_glyphs();
-    let charmap = font.charmap();
-    let glyph_for = |ch: char| {
-        charmap
-            .map(ch)
-            .or_else(|| (!ch.is_whitespace() && !ch.is_control()).then_some(GlyphId::NOTDEF))
-    };
     let size = Size::new(text.font_size as f32);
-    let metrics = font.glyph_metrics(size, LocationRef::default());
+    let mut fonts = vec![primary];
+    fonts.extend(
+        BUNDLED_FONT_FALLBACK_ORDER
+            .into_iter()
+            .filter(|family| *family != text.font_family)
+            .filter_map(|family| ReadFontsRef::new(bundled_font(family).bytes).ok()),
+    );
+    let charmaps: Vec<_> = fonts.iter().map(|font| font.charmap()).collect();
+    let metrics: Vec<_> = fonts
+        .iter()
+        .map(|font| font.glyph_metrics(size, LocationRef::default()))
+        .collect();
+    let outlines: Vec<_> = fonts.iter().map(|font| font.outline_glyphs()).collect();
+    let glyph_for = |ch: char| {
+        charmaps[0]
+            .map(ch)
+            .filter(|glyph| *glyph != GlyphId::NOTDEF)
+            .map(|glyph| (0, glyph))
+            .or_else(|| {
+                if ch.is_whitespace() || ch.is_control() {
+                    return None;
+                }
+                charmaps
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .find_map(|(index, charmap)| {
+                        charmap
+                            .map(ch)
+                            .filter(|glyph| *glyph != GlyphId::NOTDEF)
+                            .map(|glyph| (index, glyph))
+                    })
+            })
+            .or_else(|| (!ch.is_whitespace() && !ch.is_control()).then_some((0, GlyphId::NOTDEF)))
+    };
 
     let (r, g, b, a) = apply_opacity(text.color, opacity);
     if a == 0 {
@@ -201,13 +367,14 @@ fn draw_text(pixmap: &mut Pixmap, text: &TextPrimitive, transform: Transform, op
     paint.set_color_rgba8(r, g, b, a);
     paint.anti_alias = true;
 
-    for (i, line) in text.content.split('\n').enumerate() {
+    let content = normalize_newlines(&text.content);
+    for (i, line) in content.split('\n').enumerate() {
         let baseline_y = (text.y + text.baseline_offset + i as f64 * text.line_height) as f32;
 
         let line_width: f32 = line
             .chars()
             .filter_map(glyph_for)
-            .filter_map(|g| metrics.advance_width(g))
+            .filter_map(|(font, glyph)| metrics[font].advance_width(glyph))
             .sum();
 
         let start_x = match text.align {
@@ -218,27 +385,18 @@ fn draw_text(pixmap: &mut Pixmap, text: &TextPrimitive, transform: Transform, op
 
         let mut cursor_x = start_x;
         for ch in line.chars() {
-            if let Some(glyph_id) = glyph_for(ch) {
-                if let Some(outline) = outlines.get(glyph_id) {
-                    if let Some(path) =
+            if let Some((font, glyph_id)) = glyph_for(ch) {
+                if let Some(outline) = outlines[font].get(glyph_id)
+                    && let Some(path) =
                         glyph_path(&outline, text.font_size as f32, cursor_x, baseline_y)
-                    {
-                        pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
-                    }
+                {
+                    pixmap.fill_path(&path, &paint, FillRule::Winding, transform, mask);
                 }
-                if let Some(advance) = metrics.advance_width(glyph_id) {
+                if let Some(advance) = metrics[font].advance_width(glyph_id) {
                     cursor_x += advance;
                 }
             }
         }
-    }
-}
-
-fn font_bytes(family: &str) -> &'static [u8] {
-    match family {
-        "Liberation Sans" => LIBERATION_SANS_REGULAR,
-        "Cascadia Code" => CASCADIA_CODE,
-        _ => EXCALIFONT_REGULAR,
     }
 }
 
@@ -365,23 +523,55 @@ fn draw_image(
     image: &ImagePrimitive,
     transform: Transform,
     opacity: f64,
+    mask: Option<&Mask>,
 ) -> Result<()> {
-    let img = decode_embedded_png(&image.data_url)?;
+    let img = decode_embedded_png(&image.asset.data_url)?;
     let iw = img.width() as f32;
     let ih = img.height() as f32;
 
-    // Scale the source image into the element box, optionally flipping.
-    let sx = image.width as f32 / iw;
-    let sy = image.height as f32 / ih;
-    let (sx, tx) = if image.flip_x {
-        (-sx, image.width as f32)
+    let (sx, sy, tx, ty) = if let Some(crop) = image.crop {
+        let crop_x = iw * crop.x as f32;
+        let crop_y = ih * crop.y as f32;
+        let crop_width = iw * crop.width as f32;
+        let crop_height = ih * crop.height as f32;
+        ensure!(
+            crop_width > 0.0 && crop_height > 0.0,
+            "Invalid embedded PNG crop dimensions"
+        );
+
+        // Map the selected source window into the element box, then flip within it.
+        let sx = image.width as f32 / crop_width;
+        let sy = image.height as f32 / crop_height;
+        let (sx, tx) = if image.flip_x {
+            (-sx, sx * (crop_x + crop_width))
+        } else {
+            (sx, -sx * crop_x)
+        };
+        let (sy, ty) = if image.flip_y {
+            (-sy, sy * (crop_y + crop_height))
+        } else {
+            (sy, -sy * crop_y)
+        };
+        ensure!(
+            [sx, sy, tx, ty].into_iter().all(f32::is_finite),
+            "Invalid embedded PNG crop scale"
+        );
+        (sx, sy, tx, ty)
     } else {
-        (sx, 0.0)
-    };
-    let (sy, ty) = if image.flip_y {
-        (-sy, image.height as f32)
-    } else {
-        (sy, 0.0)
+        // Preserve the original uncropped placement fast path.
+        let sx = image.width as f32 / iw;
+        let sy = image.height as f32 / ih;
+        let (sx, tx) = if image.flip_x {
+            (-sx, image.width as f32)
+        } else {
+            (sx, 0.0)
+        };
+        let (sy, ty) = if image.flip_y {
+            (-sy, image.height as f32)
+        } else {
+            (sy, 0.0)
+        };
+        (sx, sy, tx, ty)
     };
 
     let placement = Transform::from_translate(image.x as f32, image.y as f32)
@@ -395,13 +585,83 @@ fn draw_image(
     };
     paint.opacity = opacity.clamp(0.0, 1.0) as f32;
 
-    pixmap.draw_pixmap(0, 0, img.as_ref(), &paint, img_tf, None);
+    let mut clip = image_clip(pixmap, image, transform)?;
+    if let (Some(image_mask), Some(frame_mask)) = (clip.as_mut(), mask) {
+        for (image_alpha, frame_alpha) in image_mask.data_mut().iter_mut().zip(frame_mask.data()) {
+            *image_alpha = (u16::from(*image_alpha) * u16::from(*frame_alpha) / 255) as u8;
+        }
+    }
+    let clip = clip.as_ref().or(mask);
+    pixmap.draw_pixmap(0, 0, img.as_ref(), &paint, img_tf, clip);
     Ok(())
+}
+
+fn image_clip(
+    pixmap: &Pixmap,
+    image: &ImagePrimitive,
+    transform: Transform,
+) -> Result<Option<Mask>> {
+    if image.crop.is_none() && image.corner_radius == 0.0 {
+        return Ok(None);
+    }
+    let rect = Rect::from_xywh(
+        image.x as f32,
+        image.y as f32,
+        image.width as f32,
+        image.height as f32,
+    )
+    .context("Invalid embedded PNG clip geometry")?;
+    let path = if image.corner_radius > 0.0 {
+        let r = image.corner_radius as f32;
+        let c = r * 0.552_284_8;
+        let (left, top, right, bottom) = (rect.left(), rect.top(), rect.right(), rect.bottom());
+        let mut pb = PathBuilder::new();
+        pb.move_to(left + r, top);
+        pb.line_to(right - r, top);
+        pb.cubic_to(right - r + c, top, right, top + r - c, right, top + r);
+        pb.line_to(right, bottom - r);
+        pb.cubic_to(
+            right,
+            bottom - r + c,
+            right - r + c,
+            bottom,
+            right - r,
+            bottom,
+        );
+        pb.line_to(left + r, bottom);
+        pb.cubic_to(left + r - c, bottom, left, bottom - r + c, left, bottom - r);
+        pb.line_to(left, top + r);
+        pb.cubic_to(left, top + r - c, left + r - c, top, left + r, top);
+        pb.close();
+        pb.finish().context("Invalid embedded PNG rounded clip")?
+    } else {
+        PathBuilder::from_rect(rect)
+    };
+    let mut mask = Mask::new(pixmap.width(), pixmap.height())
+        .context("Failed to allocate embedded PNG clip")?;
+    mask.fill_path(&path, FillRule::Winding, true, transform);
+    Ok(Some(mask))
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn build_frame_mask(width: u32, height: u32, base: Transform, clip: &FrameClip) -> Option<Mask> {
+    let path = build_path(&clip.ops)?;
+    let transform = if clip.rotation_deg == 0.0 {
+        base
+    } else {
+        base.pre_concat(Transform::from_rotate_at(
+            clip.rotation_deg as f32,
+            clip.center.0 as f32,
+            clip.center.1 as f32,
+        ))
+    };
+    let mut mask = Mask::new(width, height)?;
+    mask.fill_path(&path, FillRule::Winding, true, transform);
+    Some(mask)
+}
 
 fn raster_size(width: f64, height: f64) -> Result<(u32, u32)> {
     let axis = |dim: f64| {
@@ -518,10 +778,10 @@ mod tests {
         };
         for family in ["Excalifont", "Liberation Sans", "Cascadia Code"] {
             text.font_family = family;
-            let font = ReadFontsRef::new(font_bytes(family)).unwrap();
+            let font = ReadFontsRef::new(bundled_font(family).bytes).unwrap();
             assert!(font.charmap().map('\u{10fffd}').is_none());
             let mut pixmap = Pixmap::new(40, 40).unwrap();
-            draw_text(&mut pixmap, &text, Transform::identity(), 1.0);
+            draw_text(&mut pixmap, &text, Transform::identity(), 1.0, None);
             assert!(
                 pixmap.pixels().iter().any(|pixel| pixel.alpha() > 0),
                 "{family}"

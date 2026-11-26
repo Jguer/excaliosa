@@ -3,8 +3,72 @@ pub fn get_font_family(font_id: Option<i32>) -> &'static str {
     match font_id {
         Some(2 | 9) => "Liberation Sans", // Helvetica or Liberation Sans
         Some(3) => "Cascadia Code",
+        Some(8) => "Comic Shanns",
         _ => "Excalifont", // ID 5, legacy Virgil (1), or any unavailable font
     }
+}
+
+/// Migrate the legacy CSS-like font shorthand to Excalidraw's numeric fields.
+pub(crate) fn parse_legacy_font(font: &str) -> Option<(f64, i32)> {
+    let (size, family) = font.split_once(' ')?;
+    let size = size
+        .strip_suffix("px")
+        .unwrap_or(size)
+        .parse::<f64>()
+        .ok()?;
+    if !size.is_finite() || size <= 0.0 || !(size as f32).is_finite() || size as f32 == 0.0 {
+        return None;
+    }
+    let family = match family {
+        "Virgil" => 1,
+        "Helvetica" => 2,
+        "Cascadia" => 3,
+        "Nunito" => 6,
+        "Lilita One" => 7,
+        "Comic Shanns" => 8,
+        "Liberation Sans" => 9,
+        "Assistant" => 10,
+        "Excalifont" => 5,
+        _ => 5,
+    };
+    Some((size, family))
+}
+
+/// Normalize Excalidraw's accepted newline forms without dropping empty lines.
+pub fn normalize_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// Resolve SVG direction from the first directional character, as upstream does.
+pub fn text_direction(text: &str) -> &'static str {
+    for ch in text.chars() {
+        if is_ltr(ch) {
+            return "ltr";
+        }
+        if is_rtl(ch) {
+            return "rtl";
+        }
+    }
+    "ltr"
+}
+
+fn is_ltr(ch: char) -> bool {
+    matches!(ch,
+        'A'..='Z' | 'a'..='z'
+        | '\u{00c0}'..='\u{00d6}' | '\u{00d8}'..='\u{00f6}'
+        | '\u{00f8}'..='\u{02b8}' | '\u{0300}'..='\u{0590}'
+        | '\u{0800}'..='\u{1fff}' | '\u{2c00}'..='\u{fb1c}'
+        | '\u{fdfe}'..='\u{fe6f}' | '\u{fefd}'..='\u{ffff}'
+        | '\u{10000}'..='\u{10ffff}'
+    )
+}
+
+fn is_rtl(ch: char) -> bool {
+    matches!(ch,
+        '\u{0591}'..='\u{07ff}'
+        | '\u{fb1d}'..='\u{fdfd}'
+        | '\u{fe70}'..='\u{fefc}'
+    )
 }
 
 /// Line height and alphabetic baseline measured from the top of a line box.
@@ -13,6 +77,7 @@ pub(crate) fn text_metrics(family: &str, size: f64, line_height: Option<f64>) ->
     let (units_per_em, ascent, descent, default_line_height) = match family {
         "Liberation Sans" => (2048.0, 1854.0, 434.0, 1.15),
         "Cascadia Code" => (2048.0, 1900.0, 480.0, 1.2),
+        "Comic Shanns" => (1000.0, 750.0, 250.0, 1.25),
         _ => (1000.0, 886.0, 374.0, 1.25),
     };
     let height = line_height.unwrap_or(default_line_height) * size;

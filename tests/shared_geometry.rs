@@ -1,4 +1,4 @@
-use excaliosa::models::RoundnessType;
+use excaliosa::models::{ArrowheadField, RoundnessType};
 use excaliosa::scene::{PaintedPath, PathOp, Primitive, Rgba};
 use excaliosa::{ExcalidrawData, ExcalidrawElement, build_scene, calculate_viewbox};
 
@@ -23,7 +23,7 @@ fn arrow(kind: &str) -> ExcalidrawElement {
     ExcalidrawElement {
         element_type: "arrow".into(),
         points: Some(vec![(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)]),
-        end_arrowhead: Some(kind.into()),
+        end_arrowhead: ArrowheadField::Named(kind.into()),
         roughness: 0.0,
         ..Default::default()
     }
@@ -56,7 +56,7 @@ fn bundled_leftward_connector_is_inside_viewport() {
 }
 
 #[test]
-fn linear_bounds_use_the_renderers_stored_box_pivot() {
+fn linear_bounds_use_the_generated_shaft_pivot() {
     let element = ExcalidrawElement {
         x: 100.0,
         y: 50.0,
@@ -67,9 +67,10 @@ fn linear_bounds_use_the_renderers_stored_box_pivot() {
         ..arrow("arrow")
     };
     let scene = scene_for(vec![element], None);
-    assert_eq!(scene.drawables[0].center, (150.0, 60.0));
-    assert!((scene.viewbox.min_x - 120.0).abs() < 1e-9);
-    assert!((scene.viewbox.min_y - (-130.0)).abs() < 1e-9);
+    assert_eq!(scene.drawables[0].center, (50.0, 50.0));
+    assert!((scene.viewbox.min_x - 10.0).abs() < 1e-9);
+    assert!((scene.viewbox.min_y - (-40.0)).abs() < 1e-9);
+    assert!((scene.viewbox.width - 80.0).abs() < 1e-9);
     assert!((scene.viewbox.height - 180.0).abs() < 1e-9);
 }
 
@@ -82,62 +83,75 @@ fn bounds_keep_frames_but_not_unsupported_elements() {
         ..Default::default()
     };
     let unsupported = ExcalidrawElement {
-        element_type: "freedraw".into(),
+        element_type: "selection".into(),
         x: 1_000.0,
         ..Default::default()
     };
     let view = calculate_viewbox(&[frame, unsupported]);
     assert_eq!(
         (view.min_x, view.min_y, view.width, view.height),
-        (-40.0, -40.0, 180.0, 130.0)
+        (-40.0, -60.5, 180.0, 150.5)
     );
 }
 
 #[test]
 fn sharp_arrowhead_follows_its_final_segment() {
     let scene = scene_for(vec![arrow("arrow")], None);
-    let head = paths(&scene.drawables[0].primitive).last().unwrap();
-    let [
-        PathOp::Move(x1, y1),
-        PathOp::Line(100.0, 100.0),
-        PathOp::Move(x2, y2),
-        PathOp::Line(100.0, 100.0),
-    ] = head.ops.as_slice()
-    else {
-        panic!("unexpected open arrowhead: {:?}", head.ops);
-    };
-    assert!(((x1 + x2) / 2.0 - 100.0).abs() < 1e-9);
-    assert!((y1 - y2).abs() < 1e-9);
-    assert!(*y1 < 100.0);
+    let heads = &paths(&scene.drawables[0].primitive)[1..];
+    assert_eq!(heads.len(), 2);
+    let mut flanks = Vec::new();
+    for head in heads {
+        let Some(PathOp::Move(x, y)) = head.ops.first() else {
+            panic!("unexpected open arrowhead: {:?}", head.ops);
+        };
+        assert!(matches!(
+            head.ops.last(),
+            Some(PathOp::Cubic(_, _, _, _, 100.0, 100.0))
+        ));
+        flanks.push((*x, *y));
+    }
+    assert!(((flanks[0].0 + flanks[1].0) / 2.0 - 100.0).abs() < 1e-9);
+    assert!((flanks[0].1 - flanks[1].1).abs() < 1e-9);
+    assert!(flanks[0].1 < 100.0);
 
     let scene = scene_for(vec![arrow("bar")], None);
     let head = paths(&scene.drawables[0].primitive).last().unwrap();
-    assert_eq!(
-        head.ops,
-        [PathOp::Move(85.0, 100.0), PathOp::Line(115.0, 100.0)]
-    );
+    assert!(matches!(
+        head.ops.first(),
+        Some(PathOp::Move(85.0, 100.0))
+    ));
+    assert!(matches!(
+        head.ops.last(),
+        Some(PathOp::Cubic(_, _, _, _, 115.0, 100.0))
+    ));
 }
 
 #[test]
 fn outline_heads_follow_export_background() {
     let dark = Rgba(20, 20, 20, 255);
     let transparent = Rgba(0, 0, 0, 0);
+    let white = Rgba(255, 255, 255, 255);
     for kind in ["circle_outline", "triangle_outline", "diamond_outline"] {
         for (background, expected) in [
-            (Some(dark), Some(dark)),
-            (Some(transparent), None),
-            (None, None),
+            (Some(dark), dark),
+            (Some(transparent), transparent),
+            (None, white),
         ] {
             let scene = scene_for(vec![arrow(kind)], background);
-            let head = paths(&scene.drawables[0].primitive).last().unwrap();
-            assert_eq!(head.fill, expected, "{kind}");
-            assert!(head.stroke.is_some());
+            let head = paths(&scene.drawables[0].primitive)
+                .iter()
+                .find(|path| path.fill.is_some())
+                .unwrap();
+            assert_eq!(head.fill, Some(expected), "{kind}");
+            assert!(paths(&scene.drawables[0].primitive)
+                .iter()
+                .any(|path| path.stroke.is_some()));
         }
     }
 }
 
 #[test]
-fn crowfoot_variants_have_a_bar_a_fork_or_both() {
+fn cardinality_variants_have_a_bar_a_fork_or_both() {
     let heads = |kind| {
         let scene = scene_for(vec![arrow(kind)], None);
         paths(&scene.drawables[0].primitive)[1..]
@@ -145,14 +159,24 @@ fn crowfoot_variants_have_a_bar_a_fork_or_both() {
             .map(|p| p.ops.clone())
             .collect::<Vec<_>>()
     };
-    let one = heads("crowfoot_one");
-    let many = heads("crowfoot_many");
-    assert!(matches!(one[0].as_slice(), [PathOp::Move(_, y1), PathOp::Line(_, y2)] if y1 == y2));
-    assert_eq!(many[0].len(), 4);
-    assert_eq!(
-        heads("crowfoot_one_or_many"),
-        vec![many[0].clone(), one[0].clone()]
-    );
+    let one = heads("cardinality_one");
+    let many = heads("cardinality_many");
+    assert_eq!(one.len(), 1);
+    assert!(matches!(
+        (one[0].first(), one[0].last()),
+        (Some(PathOp::Move(_, y1)), Some(PathOp::Cubic(_, _, _, _, _, y2))) if y1 == y2
+    ));
+    assert_eq!(many.len(), 2);
+    assert!(many.iter().all(|path| path.len() >= 2));
+    let composite = heads("cardinality_one_or_many");
+    assert_eq!(composite[..2], many);
+    assert_eq!(composite.len(), 3);
+    let (Some(PathOp::Move(_, plain_y)), Some(PathOp::Move(_, composite_y))) =
+        (one[0].first(), composite[2].first())
+    else {
+        panic!("unexpected cardinality bar");
+    };
+    assert_eq!(composite_y - plain_y, 5.0);
 }
 
 #[test]

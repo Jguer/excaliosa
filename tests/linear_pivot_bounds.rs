@@ -1,5 +1,6 @@
 use std::f64::consts::FRAC_PI_4;
 
+use excaliosa::models::RoundnessType;
 use excaliosa::scene::{LabelGap, PathOp, Primitive, Rgba};
 use excaliosa::{ExcalidrawData, ExcalidrawElement, build_scene, generate_svg, render_to_png};
 
@@ -84,7 +85,7 @@ fn transparent_png_probes_cover_shaft_cap_label_gap_and_margin() {
     };
 
     assert!(alpha_at(150.0, 260.0) > 0, "shaft must be visible");
-    assert!(alpha_at(150.0, 250.0) > 0, "cap must rotate with the shaft");
+    assert!(alpha_at(156.0, 267.0) > 0, "cap must rotate with the shaft");
     assert_eq!(alpha_at(150.0, 312.0), 0, "label gap must mask the shaft");
     assert_eq!(
         alpha_at(viewbox.min_x + 2.0, viewbox.min_y + 2.0),
@@ -150,19 +151,98 @@ fn rotated_circle_and_diamond_use_geometric_bounds() {
 }
 
 #[test]
-fn oversized_linear_png_fails_before_replacing_the_destination() {
-    let mut data = fixture();
-    data.elements = vec![ExcalidrawElement {
+fn nearly_symmetric_curve_keeps_its_true_pivot() {
+    let curve = scene_for(vec![ExcalidrawElement {
         element_type: "line".into(),
         roughness: 0.0,
-        points: Some(vec![(0.0, 0.0), (9000.0, 0.0)]),
+        points: Some(vec![
+            (0.0, -6000.0),
+            (100.0, 0.0),
+            (200.0, 1e-15),
+            (300.0, -6000.0),
+        ]),
+        roundness: Some(RoundnessType {
+            roundness_type: 2,
+            value: None,
+        }),
         ..Default::default()
-    }];
+    }]);
+
+    close(curve.drawables[0].center.1, -2625.0);
+}
+
+#[test]
+fn transparent_spellings_share_filled_curve_bounds() {
+    let curve = |stroke_color: &str| ExcalidrawElement {
+        element_type: "line".into(),
+        angle: std::f64::consts::FRAC_PI_2,
+        stroke_color: stroke_color.into(),
+        background_color: "#ff0000".into(),
+        fill_style: "solid".into(),
+        roughness: 0.0,
+        points: Some(vec![
+            (0.0, 0.0),
+            (0.0, 600.0),
+            (400.0, 600.0),
+            (400.0, 0.0),
+            (0.0, 0.0),
+        ]),
+        roundness: Some(RoundnessType {
+            roundness_type: 2,
+            value: None,
+        }),
+        ..Default::default()
+    };
+    let transparent = scene_for(vec![curve("transparent")]);
+    let transparent_hex = scene_for(vec![curve("#00000000")]);
+
+    let geometry = |scene: &excaliosa::scene::Scene| {
+        (
+            scene.drawables[0].center,
+            scene.viewbox.min_x,
+            scene.viewbox.min_y,
+            scene.viewbox.width,
+            scene.viewbox.height,
+        )
+    };
+    assert_eq!(geometry(&transparent), geometry(&transparent_hex));
+    assert!(transparent.viewbox.height > 480.0);
+}
+
+#[test]
+fn oversized_linear_png_fails_before_replacing_the_destination() {
+    let cases = [
+        ExcalidrawElement {
+            element_type: "line".into(),
+            roughness: 0.0,
+            points: Some(vec![(0.0, 0.0), (9000.0, 0.0)]),
+            ..Default::default()
+        },
+        ExcalidrawElement {
+            element_type: "line".into(),
+            angle: FRAC_PI_4,
+            roughness: 0.0,
+            points: Some(vec![(1.4e308, 1.4e308), (-1.4e308, -1.4e308)]),
+            ..Default::default()
+        },
+        ExcalidrawElement {
+            element_type: "arrow".into(),
+            roughness: 0.0,
+            points: Some(vec![(0.0, -1e155), (0.0, 0.0), (100.0, 0.0)]),
+            elbowed: Some(true),
+            ..Default::default()
+        },
+    ];
     let directory = tempfile::tempdir().unwrap();
     let output = directory.path().join("oversized.png");
-    std::fs::write(&output, b"previous output").unwrap();
 
-    let error = render_to_png(&data, &output, Some((0, 0, 0, 0)), 75, None).unwrap_err();
-    assert!(error.to_string().contains("Invalid PNG output dimensions"));
-    assert_eq!(std::fs::read(output).unwrap(), b"previous output");
+    for element in cases {
+        let mut data = fixture();
+        data.elements = vec![element];
+        std::fs::write(&output, b"previous output").unwrap();
+
+        let error = render_to_png(&data, &output, Some((0, 0, 0, 0)), 75, None).unwrap_err();
+        assert!(error.to_string().contains("Invalid PNG output dimensions"));
+        assert_eq!(std::fs::read(&output).unwrap(), b"previous output");
+    }
 }

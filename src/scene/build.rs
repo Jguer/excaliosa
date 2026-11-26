@@ -9,6 +9,7 @@ use euclid::default::Point2D;
 use palette::Srgba;
 use roughr::core::{Drawable as RoughDrawable, FillStyle, OpSet, OpSetType, OpType, Options};
 use roughr::generator::Generator;
+use roughr::renderer::svg_path;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -483,7 +484,12 @@ fn generate_linear_shaft(
     } else {
         None
     };
-    let mut opts = rough_options(el, has_stroke(el), !outline_only && fill.is_some(), elbowed);
+    let mut opts = rough_options(
+        el,
+        outline_only || has_stroke(el),
+        !outline_only && fill.is_some(),
+        elbowed,
+    );
     if !outline_only && fill.is_some() && el.fill_style != "solid" {
         let gap = f64::from(opts.hachure_gap.unwrap_or(0.0).max(0.1));
         // roughr scans rotated world-space polygons; keep the outline when its step rounds away.
@@ -497,6 +503,19 @@ fn generate_linear_shaft(
     }
     let shaft = if elbowed && abs.len() >= 3 {
         match build_elbow_arrow_path(&abs, 16.0) {
+            Some(d) if opts.fill.is_none() => {
+                let mut options = opts;
+                let sets = if options.stroke.is_some() {
+                    vec![svg_path(d, &mut options)]
+                } else {
+                    vec![]
+                };
+                RoughDrawable {
+                    shape: "path".into(),
+                    options,
+                    sets,
+                }
+            }
             Some(d) => generator.path::<f64>(d, &Some(opts)),
             None => generator.linear_path::<f64>(&to_points(&abs), false, &Some(opts)),
         }

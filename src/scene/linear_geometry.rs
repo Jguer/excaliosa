@@ -74,7 +74,9 @@ pub(crate) fn measure_linear(
     let rotation = Some((center, element.angle));
     let rotated_bounds = outline
         .and_then(|paths| path_bounds(paths, rotation))
-        .or_else(|| raw.and_then(|bounds| rotate_bounds(bounds, center, element.angle)))
+        .or_else(|| {
+            raw.map(|bounds| rotate_bounds(bounds, center, element.angle).unwrap_or(bounds))
+        })
         .or_else(|| stored.and_then(|bounds| rotate_bounds(bounds, center, element.angle)))
         .or(stored)
         .unwrap_or(unrotated);
@@ -236,7 +238,12 @@ fn quadratic_roots(a: f64, b: f64, c: f64) -> Option<Vec<f64>> {
         return Some(vec![]);
     }
     let root = discriminant.sqrt();
-    Some(vec![(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)])
+    let q = -0.5 * (b + root.copysign(b));
+    Some(if q == 0.0 {
+        vec![-b / (2.0 * a)]
+    } else {
+        vec![q / a, c / q]
+    })
 }
 
 #[cfg(test)]

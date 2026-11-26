@@ -105,8 +105,8 @@ fn embed_label(el: &ExcalidrawElement) -> Option<TextPrimitive> {
     } else {
         content
     };
-    let color = if el.stroke_color.eq_ignore_ascii_case("transparent") || el.stroke_color.is_empty()
-    {
+    let stroke_color = el.stroke_color.trim();
+    let color = if stroke_color.eq_ignore_ascii_case("transparent") || stroke_color.is_empty() {
         Rgba(0, 0, 0, 255)
     } else {
         Rgba::from_tuple(parse_color(&el.stroke_color))
@@ -431,6 +431,20 @@ mod tests {
         assert!(paper.iter().any(|op| matches!(op, PathOp::Cubic(..))));
         let shadow = sticky_note_path(&note, true);
         assert_ne!(paper, shadow);
+    }
+
+    #[test]
+    fn transparent_embed_labels_stay_opaque_black() {
+        for stroke_color in ["transparent", " TransParent "] {
+            let embed = ExcalidrawElement {
+                element_type: "iframe".into(),
+                width: 200.0,
+                height: 100.0,
+                stroke_color: stroke_color.into(),
+                ..Default::default()
+            };
+            assert_eq!(embed_label(&embed).unwrap().color, Rgba(0, 0, 0, 255));
+        }
     }
 
     #[test]

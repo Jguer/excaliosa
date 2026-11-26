@@ -17,8 +17,7 @@ use std::sync::Arc;
 use crate::arrow_utils::{
     CARDINALITY_INNER_BAR_OFFSET, CARDINALITY_ONE_OR_MANY_BAR_OFFSET,
     CARDINALITY_ZERO_CIRCLE_OFFSET, CARDINALITY_ZERO_CIRCLE_SCALE, build_elbow_arrow_path,
-    calc_arrowhead_points_at_size, calculate_arrowhead_direction, normalize_arrowhead,
-    resolve_arrowhead_size,
+    calc_arrowhead_points_at_size, normalize_arrowhead, resolve_arrowhead_size,
 };
 use crate::color_utils::{fill_color, has_stroke, parse_color, parse_scene_color};
 use crate::font_utils::{get_font_family, text_metrics};
@@ -35,7 +34,7 @@ use crate::utils::{calculate_viewbox_with_labels, contributes_bounds};
 use super::arrow_label::{ResolvedArrowLabel, resolve_arrow_labels};
 use super::frame::{build_frame, containing_frame, frame_clip};
 use super::freedraw;
-use super::linear_geometry::{LinearMeasurements, measure_linear};
+use super::linear_geometry::{LinearMeasurements, generated_cap_direction, measure_linear};
 use super::static_elements::{build_embed, build_sticky_note};
 use super::{
     Drawable, ImageAsset, ImageCrop, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene,
@@ -423,7 +422,11 @@ fn build_line(
     let should_stroke = has_stroke(el);
     let stroke = should_stroke.then(|| Rgba::from_tuple(parse_color(&el.stroke_color)));
     let dash = get_stroke_dash_array(&el.stroke_style, el.stroke_width);
-    let curved = !el.elbowed.unwrap_or(false) && el.roundness.is_some() && points.len() >= 3;
+    let cap_ops = shaft
+        .sets
+        .iter()
+        .find(|set| set.op_set_type == OpSetType::Path)
+        .map(convert_ops);
     let mut out = lower_drawable(&shaft, stroke, fill, el.stroke_width, dash);
 
     // Caps share the element seed but apply their own roughness and dash rules.
@@ -433,19 +436,19 @@ fn build_line(
                 generator,
                 el,
                 points,
+                cap_ops.as_deref(),
                 "start",
                 s,
                 cap_background,
-                curved,
             ));
             out.extend(arrowhead_paths(
                 generator,
                 el,
                 points,
+                cap_ops.as_deref(),
                 "end",
                 s,
                 cap_background,
-                curved,
             ));
         }
     }
@@ -534,10 +537,10 @@ fn arrowhead_paths(
     generator: &Generator,
     el: &ExcalidrawElement,
     points: &[(f64, f64)],
+    shaft_ops: Option<&[PathOp]>,
     position: &str,
     stroke: Rgba,
     cap_background: Rgba,
-    curved: bool,
 ) -> Vec<PaintedPath> {
     if points.len() < 2 {
         return vec![];
@@ -560,14 +563,14 @@ fn arrowhead_paths(
         return vec![];
     };
 
-    let direction = if curved {
-        calculate_arrowhead_direction(points, el.x, el.y, position, 0.5)
-            .unwrap_or_else(|| straight_direction(points, el.x, el.y, position))
-    } else {
-        straight_direction(points, el.x, el.y, position)
+    let Some((tail_x, tail_y, tip_x, tip_y)) = shaft_ops
+        .and_then(|ops| generated_cap_direction(ops, position))
+        .or_else(|| straight_direction(points, el.x, el.y, position))
+    else {
+        return vec![];
     };
-    let (tail_x, tail_y, tip_x, tip_y, _) = direction;
     let elbowed = el.elbowed.unwrap_or(false);
+    let curved = !elbowed && el.roundness.is_some() && points.len() >= 3;
     let make = |part: &str, offset: f64, diameter_scale: f64| {
         let size = resolve_arrowhead_size(
             points,
@@ -638,13 +641,13 @@ fn arrowhead_paths(
     }
 }
 
-/// Fallback tip/tail from the raw endpoint segment when curve tangent is unavailable.
+/// Fallback tip/tail from the raw endpoint segment when shaft geometry is unavailable.
 fn straight_direction(
     points: &[(f64, f64)],
     x: f64,
     y: f64,
     position: &str,
-) -> (f64, f64, f64, f64, f64) {
+) -> Option<(f64, f64, f64, f64)> {
     let (tip_rel, tail_rel) = if position == "start" {
         (points[0], points[1])
     } else {
@@ -652,8 +655,8 @@ fn straight_direction(
     };
     let tip = (x + tip_rel.0, y + tip_rel.1);
     let tail = (x + tail_rel.0, y + tail_rel.1);
-    let seg_len = ((tip.0 - tail.0).powi(2) + (tip.1 - tail.1).powi(2)).sqrt();
-    (tail.0, tail.1, tip.0, tip.1, seg_len)
+    let length = (tip.0 - tail.0).hypot(tip.1 - tail.1);
+    (length.is_finite() && length > 0.0).then_some((tail.0, tail.1, tip.0, tip.1))
 }
 
 fn arrowhead_shape(

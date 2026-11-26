@@ -24,6 +24,7 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>)
     let fonts = font_css(&scene.drawables);
 
     let mut body = String::new();
+    let mut definitions = String::new();
     if let Some(bg) = scene.background {
         if bg.3 > 0 {
             body.push_str(&format!(
@@ -39,16 +40,21 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>)
     }
 
     for (index, drawable) in scene.drawables.iter().enumerate() {
-        let rendered = render_drawable(drawable, index);
+        let rendered = render_drawable(drawable, index, &mut definitions);
         if !rendered.is_empty() {
             body.push_str(&rendered);
             body.push('\n');
         }
     }
+    let definitions = if definitions.is_empty() {
+        definitions
+    } else {
+        format!("  <defs>\n{definitions}  </defs>\n")
+    };
 
     format!(
-        "<svg viewBox=\"{} {} {} {}\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n{}{}</svg>",
-        vb.min_x, vb.min_y, vb.width, vb.height, fonts, body
+        "<svg viewBox=\"{} {} {} {}\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n{}{}{}</svg>",
+        vb.min_x, vb.min_y, vb.width, vb.height, fonts, definitions, body
     )
 }
 
@@ -76,9 +82,26 @@ fn font_css(drawables: &[Drawable]) -> String {
     css
 }
 
-fn render_drawable(drawable: &Drawable, index: usize) -> String {
+fn render_drawable(drawable: &Drawable, index: usize, definitions: &mut String) -> String {
+    let separate_path_opacity = drawable
+        .frame_opacity
+        .is_some_and(|opacity| (opacity - 1.0).abs() > 1e-9)
+        && matches!(&drawable.primitive, Primitive::Paths(_));
     let inner = match &drawable.primitive {
-        Primitive::Paths(paths) => paths.iter().map(path_svg).collect::<Vec<_>>().join("\n"),
+        Primitive::Paths(paths) => paths
+            .iter()
+            .map(|path| {
+                path_svg(
+                    path,
+                    if separate_path_opacity {
+                        drawable.opacity
+                    } else {
+                        1.0
+                    },
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         Primitive::Text(text) => text_svg(text),
         Primitive::Image(image) => image_svg(image, index),
     };
@@ -86,10 +109,11 @@ fn render_drawable(drawable: &Drawable, index: usize) -> String {
         return String::new();
     }
 
-    // Fold element opacity and rotation into a wrapping group so overlapping
-    // rough passes composite as one layer (matching the raster backend).
+    // Fold ordinary element opacity and rotation into a wrapping group so overlapping
+    // rough passes composite as one layer. Frame-faded paths use separate paint alpha
+    // to match tiny-skia's fill/stroke compositing.
     let mut attrs = String::new();
-    if (drawable.opacity - 1.0).abs() > 1e-9 {
+    if !separate_path_opacity && (drawable.opacity - 1.0).abs() > 1e-9 {
         attrs.push_str(&format!(" opacity=\"{:.4}\"", drawable.opacity));
     }
     if drawable.rotation_deg != 0.0 {
@@ -103,6 +127,24 @@ fn render_drawable(drawable: &Drawable, index: usize) -> String {
         inner
     } else {
         format!("<g{attrs}>\n{inner}\n</g>")
+    };
+    let rendered = if let Some(clip) = &drawable.frame_clip {
+        let id = format!("excaliosa-frame-clip-{index}");
+        let transform = if clip.rotation_deg == 0.0 {
+            String::new()
+        } else {
+            format!(
+                " transform=\"rotate({} {} {})\"",
+                clip.rotation_deg, clip.center.0, clip.center.1
+            )
+        };
+        definitions.push_str(&format!(
+            "    <clipPath id=\"{id}\" clipPathUnits=\"userSpaceOnUse\"><path d=\"{}\"{transform}/></clipPath>\n",
+            ops_to_d(&clip.ops)
+        ));
+        format!("<g clip-path=\"url(#{id})\">\n{rendered}\n</g>")
+    } else {
+        rendered
     };
 
     if drawable.opacity == 0.0 {
@@ -196,15 +238,21 @@ fn valid_host(host: &str) -> bool {
     !numeric || host.parse::<Ipv4Addr>().is_ok()
 }
 
-fn path_svg(pp: &PaintedPath) -> String {
+fn path_svg(pp: &PaintedPath, opacity: f64) -> String {
     let fill = pp.fill.map(hex).unwrap_or_else(|| "none".to_string());
     let stroke = pp.stroke.map(hex).unwrap_or_else(|| "none".to_string());
 
-    let mut s = format!("<path d=\"{}\" fill=\"{}\" stroke=\"{}\"", ops_to_d(&pp.ops), fill, stroke);
+    let mut s = format!(
+        "<path d=\"{}\" fill=\"{}\" stroke=\"{}\"",
+        ops_to_d(&pp.ops),
+        fill,
+        stroke
+    );
 
     if let Some(c) = pp.fill {
-        if c.3 < 255 {
-            s.push_str(&format!(" fill-opacity=\"{:.4}\"", c.3 as f64 / 255.0));
+        let alpha = c.3 as f64 / 255.0 * opacity;
+        if alpha < 1.0 {
+            s.push_str(&format!(" fill-opacity=\"{alpha:.4}\""));
         }
         if pp.fill_even_odd {
             s.push_str(" fill-rule=\"evenodd\"");
@@ -214,12 +262,17 @@ fn path_svg(pp: &PaintedPath) -> String {
         s.push_str(&format!(" stroke-width=\"{}\"", pp.stroke_width));
     }
     if let Some(c) = pp.stroke {
-        if c.3 < 255 {
-            s.push_str(&format!(" stroke-opacity=\"{:.4}\"", c.3 as f64 / 255.0));
+        let alpha = c.3 as f64 / 255.0 * opacity;
+        if alpha < 1.0 {
+            s.push_str(&format!(" stroke-opacity=\"{alpha:.4}\""));
         }
     }
     if let Some(dash) = &pp.dash {
-        let pattern = dash.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+        let pattern = dash
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         s.push_str(&format!(" stroke-dasharray=\"{pattern}\""));
     }
     if pp.stroke.is_some() {
@@ -334,7 +387,20 @@ fn hex(c: Rgba) -> String {
 }
 
 fn escape_xml(s: &str) -> String {
-    s.replace('&', "&amp;")
+    let sanitized: String = s
+        .chars()
+        .map(|ch| match ch {
+            '\u{9}'
+            | '\u{a}'
+            | '\u{d}'
+            | '\u{20}'..='\u{d7ff}'
+            | '\u{e000}'..='\u{fffd}'
+            | '\u{10000}'..='\u{10ffff}' => ch,
+            _ => '\u{fffd}',
+        })
+        .collect();
+    sanitized
+        .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")

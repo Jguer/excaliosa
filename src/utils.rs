@@ -129,7 +129,6 @@ mod output_tests {
 }
 
 pub(crate) fn contributes_bounds(element_type: &str) -> bool {
-    // Frames still reserve space even though we don't paint their borders.
     matches!(
         element_type,
         "frame"
@@ -224,6 +223,16 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
                     );
                     include(el.x + SHADOW_OFFSET, el.y + el.height + SHADOW_OFFSET);
                 }
+            }
+        }
+        if matches!(el.element_type.as_str(), "frame" | "magicframe") {
+            // Synthesized frame names stay horizontal and above the saved box.
+            if let Some(title) = crate::scene::frame::frame_title(el) {
+                let lines = title.content.split('\n').count() as f64;
+                min_x = min_x.min(title.x);
+                min_y = min_y.min(title.y);
+                max_x = max_x.max(title.x + title.container_width);
+                max_y = max_y.max(title.y + title.line_height * lines);
             }
         }
     }

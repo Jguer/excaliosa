@@ -19,10 +19,10 @@ use crate::font_utils::normalize_newlines;
 use crate::fonts::bundled_font;
 use crate::models::ExcalidrawData;
 use crate::scene::{
-    FrameClip, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign, TextPrimitive,
-    build_scene,
+    FrameClip, ImagePrimitive, LabelGap, PaintedPath, PathOp, Primitive, Rgba, TextAlign,
+    TextPrimitive, build_scene,
 };
-use crate::utils::{calculate_viewbox, save_png_with_quality};
+use crate::utils::save_png_with_quality;
 
 const SOURCE_DPI: f64 = 96.0;
 const MAX_RASTER_AXIS: f64 = 8192.0;
@@ -45,7 +45,8 @@ pub fn render_to_png(
 ) -> Result<()> {
     ensure!(dpi != Some(0), "PNG DPI must be positive");
     let scale = dpi.map(|d| f64::from(d) / SOURCE_DPI).unwrap_or(1.0);
-    let vb = calculate_viewbox(&data.elements);
+    let scene = build_scene(data, background.map(Rgba::from_tuple));
+    let vb = scene.viewbox;
     let (width, height) = raster_size(vb.width * scale, vb.height * scale)
         .context("Invalid PNG output dimensions")?;
 
@@ -69,8 +70,6 @@ pub fn render_to_png(
             el.id
         );
     }
-    let scene = build_scene(data, background.map(Rgba::from_tuple));
-
     let mut pixmap =
         Pixmap::new(width, height).ok_or_else(|| anyhow::anyhow!("Failed to create pixmap"))?;
 
@@ -101,7 +100,7 @@ pub fn render_to_png(
             base
         };
 
-        let mask = if let Some(clip) = drawable.frame_clip.as_ref() {
+        let frame_mask = if let Some(clip) = drawable.frame_clip.as_ref() {
             if cached_mask
                 .as_ref()
                 .is_none_or(|(cached, _)| *cached != clip)
@@ -112,6 +111,17 @@ pub fn render_to_png(
         } else {
             None
         };
+        let mut label_mask = drawable
+            .label_gap
+            .and_then(|gap| arrow_label_mask(gap, base, width, height));
+        if let (Some(label_mask), Some(frame_mask)) = (label_mask.as_mut(), frame_mask) {
+            for (label_alpha, frame_alpha) in
+                label_mask.data_mut().iter_mut().zip(frame_mask.data())
+            {
+                *label_alpha = (u16::from(*label_alpha) * u16::from(*frame_alpha) / 255) as u8;
+            }
+        }
+        let mask = label_mask.as_ref().or(frame_mask);
         match &drawable.primitive {
             Primitive::Paths(paths)
                 if drawable
@@ -122,9 +132,7 @@ pub fn render_to_png(
                     draw_painted(&mut pixmap, path, tf, drawable.opacity, mask);
                 }
             }
-            Primitive::Paths(paths) => {
-                draw_paths(&mut pixmap, paths, tf, drawable.opacity, mask)
-            }
+            Primitive::Paths(paths) => draw_paths(&mut pixmap, paths, tf, drawable.opacity, mask),
             Primitive::Text(text) => draw_text(&mut pixmap, text, tf, drawable.opacity, mask),
             Primitive::Image(image) => draw_image(&mut pixmap, image, tf, drawable.opacity, mask)
                 .context("Failed to render embedded PNG image")?,
@@ -261,6 +269,19 @@ fn draw_painted(
             pixmap.stroke_path(&path, &paint, &sk, transform, mask);
         }
     }
+}
+
+fn arrow_label_mask(gap: LabelGap, base: Transform, width: u32, height: u32) -> Option<Mask> {
+    let rect = Rect::from_xywh(
+        gap.x as f32,
+        gap.y as f32,
+        gap.width as f32,
+        gap.height as f32,
+    )?;
+    let mut mask = Mask::new(width, height)?;
+    mask.fill_path(&PathBuilder::from_rect(rect), FillRule::Winding, true, base);
+    mask.invert();
+    Some(mask)
 }
 
 fn build_path(ops: &[PathOp]) -> Option<SkPath> {

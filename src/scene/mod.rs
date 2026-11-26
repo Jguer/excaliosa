@@ -6,6 +6,7 @@
 //! scene, so shape geometry is generated exactly once (via `roughr`) and the
 //! two backends render identical output.
 
+pub(crate) mod arrow_label;
 pub mod build;
 pub mod frame;
 pub(crate) mod freedraw;
@@ -111,6 +112,15 @@ pub struct ImagePrimitive {
     pub corner_radius: f64,
 }
 
+/// Scene-space rectangle excluded from an arrow's own paint for its label.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LabelGap {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 #[derive(Clone, Debug)]
 pub enum Primitive {
     Paths(Vec<PaintedPath>),
@@ -133,6 +143,8 @@ pub struct Drawable {
     pub primitive: Primitive,
     /// Saved hyperlink for the source element, if any.
     pub link: Option<String>,
+    /// Set only on arrows with a resolved, nonempty bound label.
+    pub label_gap: Option<LabelGap>,
     /// 0.0..=1.0
     pub opacity: f64,
     /// Rotation in degrees, applied about `center`.

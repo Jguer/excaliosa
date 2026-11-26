@@ -11,7 +11,7 @@ use base64::Engine;
 
 use crate::font_utils::{normalize_newlines, text_direction};
 use crate::fonts::bundled_font;
-use crate::models::ExcalidrawData;
+use crate::models::{ExcalidrawData, ViewBox};
 use crate::scene::{
     Drawable, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign, TextPrimitive,
     build_scene,
@@ -40,7 +40,7 @@ pub fn generate_svg(data: &ExcalidrawData, background: Option<(u8, u8, u8, u8)>)
     }
 
     for (index, drawable) in scene.drawables.iter().enumerate() {
-        let rendered = render_drawable(drawable, index, &mut definitions);
+        let rendered = render_drawable(drawable, index, vb, &mut definitions);
         if !rendered.is_empty() {
             body.push_str(&rendered);
             body.push('\n');
@@ -82,7 +82,12 @@ fn font_css(drawables: &[Drawable]) -> String {
     css
 }
 
-fn render_drawable(drawable: &Drawable, index: usize, definitions: &mut String) -> String {
+fn render_drawable(
+    drawable: &Drawable,
+    index: usize,
+    viewbox: ViewBox,
+    definitions: &mut String,
+) -> String {
     let separate_path_opacity = drawable
         .frame_opacity
         .is_some_and(|opacity| (opacity - 1.0).abs() > 1e-9)
@@ -127,6 +132,16 @@ fn render_drawable(drawable: &Drawable, index: usize, definitions: &mut String) 
         inner
     } else {
         format!("<g{attrs}>\n{inner}\n</g>")
+    };
+    let rendered = if let Some(gap) = drawable.label_gap {
+        let mask_id = format!("excaliosa-arrow-label-mask-{index}");
+        definitions.push_str(&format!(
+            "{}\n",
+            arrow_label_mask_svg(&mask_id, gap, viewbox)
+        ));
+        format!("<g mask=\"url(#{mask_id})\">\n{rendered}\n</g>")
+    } else {
+        rendered
     };
     let rendered = if let Some(clip) = &drawable.frame_clip {
         let id = format!("excaliosa-frame-clip-{index}");
@@ -282,6 +297,24 @@ fn path_svg(pp: &PaintedPath, opacity: f64) -> String {
     s
 }
 
+fn arrow_label_mask_svg(mask_id: &str, gap: crate::scene::LabelGap, vb: ViewBox) -> String {
+    format!(
+        "<mask id=\"{mask_id}\" maskUnits=\"userSpaceOnUse\" maskContentUnits=\"userSpaceOnUse\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\">\n<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#fff\"/>\n<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#000\"/>\n</mask>",
+        vb.min_x,
+        vb.min_y,
+        vb.width,
+        vb.height,
+        vb.min_x,
+        vb.min_y,
+        vb.width,
+        vb.height,
+        gap.x,
+        gap.y,
+        gap.width,
+        gap.height
+    )
+}
+
 fn text_svg(t: &TextPrimitive) -> String {
     let direction = text_direction(&t.content);
     let (anchor, anchor_x) = match t.align {
@@ -339,8 +372,16 @@ fn image_svg(im: &ImagePrimitive, index: usize) -> String {
     if im.flip_x || im.flip_y {
         let sx = if im.flip_x { -1.0 } else { 1.0 };
         let sy = if im.flip_y { -1.0 } else { 1.0 };
-        let tx = if im.flip_x { 2.0 * im.x + im.width } else { 0.0 };
-        let ty = if im.flip_y { 2.0 * im.y + im.height } else { 0.0 };
+        let tx = if im.flip_x {
+            2.0 * im.x + im.width
+        } else {
+            0.0
+        };
+        let ty = if im.flip_y {
+            2.0 * im.y + im.height
+        } else {
+            0.0
+        };
         transform = format!(" transform=\"translate({tx} {ty}) scale({sx} {sy})\"");
     }
     let image = format!(

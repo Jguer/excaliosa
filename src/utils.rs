@@ -151,13 +151,18 @@ pub(crate) fn contributes_bounds(element_type: &str) -> bool {
 pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
     const PADDING: f64 = 40.0;
 
+    let arrow_labels = crate::scene::arrow_label::resolve_arrow_labels(elements);
+    let bound_text: std::collections::HashSet<usize> = arrow_labels
+        .values()
+        .map(|label| label.text_index)
+        .collect();
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut max_y = f64::NEG_INFINITY;
 
-    for el in elements {
-        if el.is_deleted || !contributes_bounds(&el.element_type) {
+    for (index, el) in elements.iter().enumerate() {
+        if el.is_deleted || bound_text.contains(&index) || !contributes_bounds(&el.element_type) {
             continue;
         }
         // Linear points can extend left or above their origin. Keep the same
@@ -206,6 +211,30 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
                 // shortcut: padding covers normal overshoot; use painted paths for exact bounds.
                 for &(x, y) in points {
                     include(el.x + x, el.y + y);
+                }
+                if let Some(label) = arrow_labels.get(&index) {
+                    let text = &elements[label.text_index];
+                    let (label_cx, label_cy) = crate::math_utils::calculate_center(
+                        label.x,
+                        label.y,
+                        text.width,
+                        text.height,
+                    );
+                    let (label_sin, label_cos) = text.angle.sin_cos();
+                    for (px, py) in [
+                        (label.x, label.y),
+                        (label.x + text.width, label.y),
+                        (label.x + text.width, label.y + text.height),
+                        (label.x, label.y + text.height),
+                    ] {
+                        let (dx, dy) = (px - label_cx, py - label_cy);
+                        let rx = label_cx + dx * label_cos - dy * label_sin;
+                        let ry = label_cy + dx * label_sin + dy * label_cos;
+                        min_x = min_x.min(rx);
+                        min_y = min_y.min(ry);
+                        max_x = max_x.max(rx);
+                        max_y = max_y.max(ry);
+                    }
                 }
             }
             _ => {

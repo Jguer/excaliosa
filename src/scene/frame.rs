@@ -58,6 +58,7 @@ pub fn build_frame(element: &ExcalidrawElement) -> Vec<Drawable> {
         drawables.push(Drawable {
             primitive: Primitive::Text(title),
             link: None,
+            label_gap: None,
             opacity: 1.0,
             rotation_deg: 0.0,
             center: (0.0, 0.0),
@@ -78,6 +79,7 @@ pub fn build_frame(element: &ExcalidrawElement) -> Vec<Drawable> {
             2.0,
         )]),
         link: None,
+        label_gap: None,
         opacity: 1.0,
         rotation_deg: element.angle.to_degrees(),
         center: (

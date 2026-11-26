@@ -12,7 +12,9 @@ use roughr::generator::Generator;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
-use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
+use crate::arrow_utils::{
+    build_elbow_arrow_path, calc_arrowhead_points, calculate_arrowhead_direction,
+};
 use crate::color_utils::{fill_color, has_stroke, parse_color};
 use crate::font_utils::{get_font_family, text_metrics};
 use crate::math_utils::calculate_center;
@@ -23,6 +25,7 @@ use crate::rect_utils::{
 use crate::stroke_utils::get_stroke_dash_array;
 use crate::utils::{calculate_viewbox, contributes_bounds};
 
+use super::arrow_label::resolve_arrow_labels;
 use super::frame::{build_frame, containing_frame, frame_clip};
 use super::freedraw;
 use super::static_elements::{build_embed, build_sticky_note};
@@ -55,6 +58,11 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
             sticky_bound_text(index, &data.elements).map(|text_index| (index, text_index))
         })
         .collect();
+    let arrow_labels = resolve_arrow_labels(&data.elements);
+    let bound_text: HashSet<usize> = arrow_labels
+        .values()
+        .map(|label| label.text_index)
+        .collect();
     let sticky_text_indices: HashSet<usize> = sticky_labels.values().copied().collect();
     let mut drawables = Vec::new();
     let mut embeds = Vec::new();
@@ -86,10 +94,42 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
                 drawables.push(label);
             }
         } else if !sticky_text_indices.contains(&index)
+            && !bound_text.contains(&index)
             && let Some(mut drawable) = build_element(&generator, el, &data.files, background)
         {
-            apply_containing_frame(std::slice::from_mut(&mut drawable), el, &elements);
-            drawables.push(drawable);
+            if let Some(label) = arrow_labels.get(&index) {
+                drawable.label_gap = Some(label.gap);
+                let label_drawable = build_element(
+                    &generator,
+                    &data.elements[label.text_index],
+                    &data.files,
+                    background,
+                )
+                .map(|mut label_drawable| {
+                    if let Primitive::Text(text) = &mut label_drawable.primitive {
+                        text.x = label.x;
+                        text.y = label.y;
+                    }
+                    let element = &data.elements[label.text_index];
+                    label_drawable.center =
+                        calculate_center(label.x, label.y, element.width, element.height);
+                    label_drawable
+                });
+                apply_containing_frame(std::slice::from_mut(&mut drawable), el, &elements);
+                drawables.push(drawable);
+                if let Some(mut label_drawable) = label_drawable {
+                    let element = &data.elements[label.text_index];
+                    apply_containing_frame(
+                        std::slice::from_mut(&mut label_drawable),
+                        element,
+                        &elements,
+                    );
+                    drawables.push(label_drawable);
+                }
+            } else {
+                apply_containing_frame(std::slice::from_mut(&mut drawable), el, &elements);
+                drawables.push(drawable);
+            }
         }
     }
     // Iframe-like placeholders always paint above ordinary scene elements.
@@ -185,6 +225,7 @@ pub(super) fn drawable(el: &ExcalidrawElement, primitive: Primitive) -> Drawable
     Drawable {
         primitive,
         link: None,
+        label_gap: None,
         opacity: (el.opacity / 100.0).clamp(0.0, 1.0),
         rotation_deg: el.angle.to_degrees(),
         center,
@@ -260,7 +301,10 @@ fn build_line(
         return None;
     }
 
-    let abs: Vec<(f64, f64)> = points.iter().map(|(px, py)| (el.x + px, el.y + py)).collect();
+    let abs: Vec<(f64, f64)> = points
+        .iter()
+        .map(|(px, py)| (el.x + px, el.y + py))
+        .collect();
     let should_stroke = has_stroke(el);
     let stroke = should_stroke.then(|| Rgba::from_tuple(parse_color(&el.stroke_color)));
     let dash = get_stroke_dash_array(&el.stroke_style, el.stroke_width);
@@ -313,7 +357,10 @@ fn arrowhead_paths(
     curved: bool,
 ) -> Vec<PaintedPath> {
     let kind = match position {
-        "start" => el.start_arrowhead.as_deref().or(el.start_arrow_type.as_deref()),
+        "start" => el
+            .start_arrowhead
+            .as_deref()
+            .or(el.start_arrow_type.as_deref()),
         _ => el.end_arrowhead.as_deref().or(el.end_arrow_type.as_deref()),
     };
     let Some(kind) = kind else {
@@ -332,7 +379,8 @@ fn arrowhead_paths(
 
     let (tail_x, tail_y, tip_x, tip_y, seg_len) = direction;
     let make = |kind| {
-        let vals = calc_arrowhead_points(tail_x, tail_y, tip_x, tip_y, kind, el.stroke_width, seg_len);
+        let vals =
+            calc_arrowhead_points(tail_x, tail_y, tip_x, tip_y, kind, el.stroke_width, seg_len);
         arrowhead_shape(kind, &vals, stroke, el.stroke_width, background)
     };
     if kind == "crowfoot_one_or_many" {
@@ -389,12 +437,18 @@ fn arrowhead_shape(
             vec![outlined(circle_ops(vals[0], vals[1], vals[2] / 2.0))]
         }
         "bar" if vals.len() >= 4 => vec![PaintedPath::stroke_only(
-            vec![PathOp::Move(vals[0], vals[1]), PathOp::Line(vals[2], vals[3])],
+            vec![
+                PathOp::Move(vals[0], vals[1]),
+                PathOp::Line(vals[2], vals[3]),
+            ],
             stroke,
             sw,
         )],
         "crowfoot_one" if vals.len() >= 6 => vec![PaintedPath::stroke_only(
-            vec![PathOp::Move(vals[2], vals[3]), PathOp::Line(vals[4], vals[5])],
+            vec![
+                PathOp::Move(vals[2], vals[3]),
+                PathOp::Line(vals[4], vals[5]),
+            ],
             stroke,
             sw,
         )],
@@ -481,8 +535,16 @@ fn build_image(el: &ExcalidrawElement, files: &HashMap<String, Value>) -> Option
         return None;
     }
     // Negative scale components flip the image on that axis.
-    let flip_x = el.scale.as_ref().and_then(|s| s.first()).is_some_and(|v| *v < 0.0);
-    let flip_y = el.scale.as_ref().and_then(|s| s.get(1)).is_some_and(|v| *v < 0.0);
+    let flip_x = el
+        .scale
+        .as_ref()
+        .and_then(|s| s.first())
+        .is_some_and(|v| *v < 0.0);
+    let flip_y = el
+        .scale
+        .as_ref()
+        .and_then(|s| s.get(1))
+        .is_some_and(|v| *v < 0.0);
     let crop = validated_image_crop(el);
     let corner_radius = if el.roundness.is_some() {
         let radius = get_corner_radius(el.width.min(el.height), el);
@@ -656,7 +718,10 @@ pub(super) fn lower_drawable(
         Some(w) if w >= 0.0 => w as f64,
         _ => (stroke_width / 2.0).max(0.5),
     };
-    let stroke_width = drawable.options.stroke_width.map_or(stroke_width, f64::from);
+    let stroke_width = drawable
+        .options
+        .stroke_width
+        .map_or(stroke_width, f64::from);
     let even_odd = matches!(drawable.shape.as_str(), "curve" | "polygon" | "path");
 
     let mut out = Vec::new();

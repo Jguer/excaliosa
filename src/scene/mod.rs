@@ -109,6 +109,8 @@ pub enum Primitive {
 #[derive(Clone, Debug)]
 pub struct Drawable {
     pub primitive: Primitive,
+    /// Saved hyperlink for the source element, if any.
+    pub link: Option<String>,
     /// 0.0..=1.0
     pub opacity: f64,
     /// Rotation in degrees, applied about `center`.

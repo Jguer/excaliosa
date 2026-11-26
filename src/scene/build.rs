@@ -80,6 +80,7 @@ fn build_element(
 
     Some(Drawable {
         primitive,
+        link: el.link.clone(),
         opacity,
         rotation_deg,
         center,

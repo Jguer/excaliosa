@@ -4,6 +4,8 @@
 //! export matches the PNG output. Shapes are emitted as `<path>` elements (the
 //! roughr op-lists), text as `<text>`/`<tspan>`, and images as `<image>`.
 
+use std::net::Ipv4Addr;
+
 use crate::models::ExcalidrawData;
 use crate::scene::{
     build_scene, Drawable, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign,
@@ -67,11 +69,101 @@ fn render_drawable(drawable: &Drawable) -> String {
         ));
     }
 
-    if attrs.is_empty() {
+    let rendered = if attrs.is_empty() {
         inner
     } else {
         format!("<g{attrs}>\n{inner}\n</g>")
+    };
+
+    if drawable.opacity == 0.0 {
+        return rendered;
     }
+
+    match drawable.link.as_deref().and_then(safe_link_href) {
+        Some(href) => format!("<a href=\"{}\">\n{rendered}\n</a>", escape_xml(href)),
+        None => rendered,
+    }
+}
+
+fn safe_link_href(link: &str) -> Option<&str> {
+    if link.is_empty()
+        || link.chars().any(|c| {
+            c.is_control()
+                || c.is_whitespace()
+                || matches!(c, '\u{fffe}' | '\u{ffff}' | '\\' | '"' | '\'' | '<' | '>')
+        })
+    {
+        return None;
+    }
+
+    if let Some(fragment) = link.strip_prefix('#') {
+        return (!fragment.is_empty() && !fragment.contains('#')).then_some(link);
+    }
+
+    for scheme in ["https:", "http:"] {
+        if let Some(rest) = strip_scheme(link, scheme) {
+            return valid_http_url(rest).then_some(link);
+        }
+    }
+
+    let address = strip_scheme(link, "mailto:")?;
+    let (local, domain) = address.split_once('@')?;
+    (!local.is_empty()
+        && local
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'-'))
+        && !domain.contains('@')
+        && valid_host(domain))
+    .then_some(link)
+}
+
+fn strip_scheme<'a>(link: &'a str, scheme: &str) -> Option<&'a str> {
+    link.get(..scheme.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(scheme))
+        .map(|_| &link[scheme.len()..])
+}
+
+fn valid_http_url(rest: &str) -> bool {
+    let Some(rest) = rest.strip_prefix("//") else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if authority.contains('@') {
+        return false;
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) if !host.contains(':') => (host, Some(port)),
+        Some(_) => return false,
+        None => (authority, None),
+    };
+    valid_host(host)
+        && port.is_none_or(|port| {
+            !port.is_empty()
+                && port.bytes().all(|b| b.is_ascii_digit())
+                && port.parse::<u16>().is_ok()
+        })
+}
+
+fn valid_host(host: &str) -> bool {
+    if host.is_empty()
+        || !host.split('.').all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+    {
+        return false;
+    }
+
+    let last = host.rsplit('.').next().unwrap_or_default();
+    let numeric = last.bytes().all(|b| b.is_ascii_digit())
+        || (last.len() >= 2
+            && last[..2].eq_ignore_ascii_case("0x")
+            && last[2..].bytes().all(|b| b.is_ascii_hexdigit()));
+    !numeric || host.parse::<Ipv4Addr>().is_ok()
 }
 
 fn path_svg(pp: &PaintedPath) -> String {

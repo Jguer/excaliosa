@@ -79,7 +79,8 @@ fn omitted_defaults_match_explicit_defaults_in_svg_and_png() -> Result<()> {
 
 #[test]
 fn conflicting_indexes_do_not_change_file_paint_order() -> Result<()> {
-    let data = fixture();
+    let mut data = fixture();
+    data.elements[2].fill_style = "solid".to_string();
     let scene = build_scene(&data, Some(Rgba(0, 0, 0, 0)));
     assert_eq!(scene.drawables.len(), 4);
     let paint = |index: usize| {
@@ -95,7 +96,7 @@ fn conflicting_indexes_do_not_change_file_paint_order() -> Result<()> {
     assert_eq!(paint(3), Rgba(116, 192, 252, 255));
 
     let svg = generate_svg(&data, Some((0, 0, 0, 0)));
-    assert!(svg.find("stroke=\"#ffa8a8\"").unwrap() < svg.find("fill=\"#74c0fc\"").unwrap());
+    assert!(svg.find("fill=\"#ffa8a8\"").unwrap() < svg.find("fill=\"#74c0fc\"").unwrap());
     let (width, pixels) = decoded_png(&data)?;
     let x = (400.0 - scene.viewbox.min_x) as usize;
     let y = (60.0 - scene.viewbox.min_y) as usize;

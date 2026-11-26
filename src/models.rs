@@ -1,3 +1,4 @@
+use crate::font_utils::{normalize_newlines, parse_legacy_font};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 
@@ -47,12 +48,45 @@ where
     Ok(Option::<serde_json::Value>::deserialize(deserializer)?.and_then(|value| value.as_f64()))
 }
 
+fn deserialize_legacy_font<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(
+        Option::<Box<serde_json::value::RawValue>>::deserialize(deserializer)?
+            .and_then(|raw| serde_json::from_str::<String>(raw.get()).ok()),
+    )
+}
+
+fn restore_legacy_text(element: &mut ExcalidrawElement) {
+    let Some((font_size, font_family)) = element.font.as_deref().and_then(parse_legacy_font) else {
+        return;
+    };
+    element.font_size = Some(font_size);
+    element.font_family = Some(font_family);
+
+    if element
+        .line_height
+        .is_some_and(|line_height| line_height.is_finite() && line_height > 0.0)
+    {
+        return;
+    }
+    let line_count = normalize_newlines(element.text.as_deref().unwrap_or_default())
+        .split('\n')
+        .count() as f64;
+    let detected = element.height / line_count / font_size;
+    element.line_height = (detected.is_finite() && detected > 0.0).then_some(detected);
+}
+
 fn deserialize_elements<'de, D>(deserializer: D) -> Result<Vec<ExcalidrawElement>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let mut elements = Vec::<ExcalidrawElement>::deserialize(deserializer)?;
     for element in &mut elements {
+        if element.element_type == "text" {
+            restore_legacy_text(element);
+        }
         if element.element_type == "draw" {
             element.element_type = "line".into();
         }
@@ -139,6 +173,12 @@ pub struct ExcalidrawElement {
     pub locked: bool,
     pub name: Option<String>,
     pub text: Option<String>,
+    #[serde(
+        default,
+        skip_serializing,
+        deserialize_with = "deserialize_legacy_font"
+    )]
+    pub font: Option<String>,
     pub font_size: Option<f64>,
     pub font_family: Option<i32>,
     pub text_align: Option<String>,
@@ -204,6 +244,7 @@ impl Default for ExcalidrawElement {
             locked: false,
             name: None,
             text: None,
+            font: None,
             font_size: None,
             font_family: None,
             text_align: None,

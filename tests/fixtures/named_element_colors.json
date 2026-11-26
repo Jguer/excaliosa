@@ -1,0 +1,106 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "excaliosa-named-element-colors-test",
+  "elements": [
+    {
+      "id": "mixed-case",
+      "type": "rectangle",
+      "x": 20,
+      "y": 20,
+      "width": 120,
+      "height": 80,
+      "strokeColor": " DaRkSlaTeBlue ",
+      "backgroundColor": " ReBeCCaPurple ",
+      "fillStyle": "solid",
+      "strokeWidth": 3,
+      "roughness": 0,
+      "seed": 1
+    },
+    {
+      "id": "aliases",
+      "type": "ellipse",
+      "x": 170,
+      "y": 20,
+      "width": 120,
+      "height": 80,
+      "strokeColor": "aQuA",
+      "backgroundColor": " GrEy ",
+      "fillStyle": "solid",
+      "strokeWidth": 3,
+      "roughness": 0,
+      "seed": 2
+    },
+    {
+      "id": "invalid",
+      "type": "rectangle",
+      "x": 20,
+      "y": 130,
+      "width": 120,
+      "height": 80,
+      "strokeColor": "definitely-not-a-color",
+      "backgroundColor": "definitely-not-a-color",
+      "fillStyle": "solid",
+      "roughness": 0,
+      "seed": 3
+    },
+    {
+      "id": "transparent",
+      "type": "rectangle",
+      "x": 170,
+      "y": 130,
+      "width": 120,
+      "height": 80,
+      "strokeColor": " TransParent ",
+      "backgroundColor": " TransParent ",
+      "fillStyle": "solid",
+      "roughness": 0,
+      "seed": 4
+    },
+    {
+      "id": "zero-alpha",
+      "type": "rectangle",
+      "x": 320,
+      "y": 130,
+      "width": 120,
+      "height": 80,
+      "strokeColor": "#11223300",
+      "backgroundColor": "#aBcD0000",
+      "fillStyle": "solid",
+      "roughness": 0,
+      "seed": 5
+    },
+    {
+      "id": "named-text",
+      "type": "text",
+      "x": 20,
+      "y": 240,
+      "width": 180,
+      "height": 30,
+      "text": "Named text",
+      "strokeColor": " RebeccaPurple ",
+      "fontFamily": 2,
+      "fontSize": 24,
+      "lineHeight": 1.25
+    },
+    {
+      "id": "hollow-cap",
+      "type": "arrow",
+      "x": 20,
+      "y": 320,
+      "width": 300,
+      "height": 0,
+      "points": [[0, 0], [300, 0]],
+      "strokeColor": " ToMaTo ",
+      "strokeWidth": 3,
+      "roughness": 0,
+      "seed": 6,
+      "startArrowhead": null,
+      "endArrowhead": "triangle_outline"
+    }
+  ],
+  "appState": {
+    "viewBackgroundColor": " LiGhTbLue "
+  },
+  "files": {}
+}

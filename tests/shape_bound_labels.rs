@@ -250,6 +250,29 @@ fn malformed_bindings_leave_live_text_and_unrelated_art_at_saved_order() {
         &["First ambiguous", "Second ambiguous"],
         2,
     );
+
+    let mut competing_arrow = owner("arrow", "arrow", &["shared"]);
+    competing_arrow.points = Some(vec![(0.0, 0.0), (100.0, 0.0)]);
+    assert_saved_text_then_paths(
+        vec![
+            label("shared", Some("owner"), "Competing arrow"),
+            owner("rectangle", "owner", &["shared"]),
+            competing_arrow,
+            unrelated(),
+        ],
+        &["Competing arrow"],
+        3,
+    );
+
+    assert_saved_text_then_paths(
+        vec![
+            label("", Some("owner"), "Missing text ID"),
+            owner("rectangle", "owner", &[""]),
+            unrelated(),
+        ],
+        &["Missing text ID"],
+        2,
+    );
 }
 
 #[test]
@@ -262,8 +285,7 @@ fn paired_text_keeps_its_own_frame_opacity_and_safe_link() {
         opacity: 50.0,
         ..Default::default()
     };
-    let mut shape = owner("rectangle", "shape", &["label"]);
-    shape.frame_id = Some("frame".into());
+    let shape = owner("rectangle", "shape", &["label"]);
     let mut text_element = label("label", Some("shape"), "Framed label");
     text_element.frame_id = Some("frame".into());
     text_element.link = Some("https://example.test/label".into());

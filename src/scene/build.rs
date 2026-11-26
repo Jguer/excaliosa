@@ -240,13 +240,15 @@ fn resolve_shape_labels(
         if element.is_deleted {
             continue;
         }
-        live_ids
-            .entry(element.id.as_str())
-            .and_modify(|found| *found = None)
-            .or_insert(Some(index));
+        if !element.id.is_empty() {
+            live_ids
+                .entry(element.id.as_str())
+                .and_modify(|found| *found = None)
+                .or_insert(Some(index));
+        }
         if matches!(
             element.element_type.as_str(),
-            "rectangle" | "ellipse" | "diamond" | "stickynote"
+            "rectangle" | "ellipse" | "diamond" | "stickynote" | "arrow"
         ) {
             for bound in element
                 .bound_elements

@@ -16,7 +16,7 @@ pub(crate) fn parse_legacy_font(font: &str) -> Option<(f64, i32)> {
         .unwrap_or(size)
         .parse::<f64>()
         .ok()?;
-    if !size.is_finite() {
+    if !size.is_finite() || size <= 0.0 || !(size as f32).is_finite() || size as f32 == 0.0 {
         return None;
     }
     let family = match family {

@@ -52,9 +52,10 @@ fn deserialize_legacy_font<'de, D>(deserializer: D) -> Result<Option<String>, D:
 where
     D: Deserializer<'de>,
 {
-    Ok(serde_json::Value::deserialize(deserializer)?
-        .as_str()
-        .map(str::to_owned))
+    Ok(
+        Option::<Box<serde_json::value::RawValue>>::deserialize(deserializer)?
+            .and_then(|raw| serde_json::from_str::<String>(raw.get()).ok()),
+    )
 }
 
 fn restore_legacy_text(element: &mut ExcalidrawElement) {
@@ -172,7 +173,11 @@ pub struct ExcalidrawElement {
     pub locked: bool,
     pub name: Option<String>,
     pub text: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_legacy_font")]
+    #[serde(
+        default,
+        skip_serializing,
+        deserialize_with = "deserialize_legacy_font"
+    )]
     pub font: Option<String>,
     pub font_size: Option<f64>,
     pub font_family: Option<i32>,

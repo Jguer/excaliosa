@@ -28,7 +28,7 @@ fn text_primitive(data: &ExcalidrawData, id: &str) -> TextPrimitive {
         .unwrap()
 }
 
-fn single_element_document(element: &ExcalidrawElement) -> ExcalidrawData {
+fn single_element_document(element: serde_json::Value) -> ExcalidrawData {
     serde_json::from_value(json!({"type": "excalidraw", "elements": [element]})).unwrap()
 }
 
@@ -62,15 +62,23 @@ fn legacy_multiline_uses_saved_metrics_and_normalized_line_count() {
 
 #[test]
 fn legacy_and_explicitly_migrated_modern_exports_match() -> Result<(), Box<dyn Error>> {
-    let data = fixture();
-    let legacy = single_element_document(element(&data, "legacy-multiline"));
-    let mut modern_value = serde_json::to_value(element(&data, "legacy-multiline"))?;
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/legacy_text_import.json"))?;
+    let legacy_value = fixture["elements"][0].clone();
+    let legacy = single_element_document(legacy_value.clone());
+    let mut modern_value = legacy_value;
     let modern_object = modern_value.as_object_mut().unwrap();
     modern_object.remove("font");
     modern_object.insert("fontSize".into(), json!(28));
     modern_object.insert("fontFamily".into(), json!(3));
     modern_object.insert("lineHeight".into(), json!(1.05));
-    let modern = single_element_document(&serde_json::from_value(modern_value)?);
+    let modern = single_element_document(modern_value);
+
+    let serialized = serde_json::to_value(element(&legacy, "legacy-multiline"))?;
+    assert_eq!(serialized.get("font"), None);
+    assert_eq!(serialized.get("fontSize"), Some(&json!(28.0)));
+    assert_eq!(serialized.get("fontFamily"), Some(&json!(3)));
+    assert_eq!(serialized.get("lineHeight"), Some(&json!(1.05)));
 
     let legacy_text = text_primitive(&legacy, "legacy-multiline");
     let modern_text = text_primitive(&modern, "legacy-multiline");
@@ -127,6 +135,62 @@ fn explicit_advance_wins_and_modern_default_is_not_detected() {
         text_primitive(&zero_override, "zero-override").line_height,
         40.0
     );
+}
+
+#[test]
+fn unusable_legacy_sizes_keep_valid_modern_settings() {
+    for font in [
+        "-12px Cascadia",
+        "0px Cascadia",
+        "1e-50px Cascadia",
+        "1e100px Cascadia",
+    ] {
+        let data: ExcalidrawData = serde_json::from_value(json!({
+            "type": "excalidraw",
+            "elements": [{
+                "id": "invalid-size",
+                "type": "text",
+                "text": "Modern settings",
+                "width": 100,
+                "height": 28,
+                "font": font,
+                "fontSize": 20,
+                "fontFamily": 3,
+                "lineHeight": 1.4
+            }]
+        }))
+        .unwrap();
+        let text = element(&data, "invalid-size");
+        assert_eq!(text.font_size, Some(20.0), "font: {font}");
+        assert_eq!(text.font_family, Some(3), "font: {font}");
+        assert_eq!(text.line_height, Some(1.4), "font: {font}");
+    }
+}
+
+#[test]
+fn out_of_range_non_string_legacy_font_is_ignored() {
+    let data: ExcalidrawData = serde_json::from_str(
+        r#"{
+            "type": "excalidraw",
+            "elements": [{
+                "id": "out-of-range-font",
+                "type": "text",
+                "text": "Modern settings",
+                "width": 100,
+                "height": 28,
+                "font": 1e400,
+                "fontSize": 20,
+                "fontFamily": 3,
+                "lineHeight": 1.4
+            }]
+        }"#,
+    )
+    .unwrap();
+    let text = element(&data, "out-of-range-font");
+    assert_eq!(text.font, None);
+    assert_eq!(text.font_size, Some(20.0));
+    assert_eq!(text.font_family, Some(3));
+    assert_eq!(text.line_height, Some(1.4));
 }
 
 #[test]

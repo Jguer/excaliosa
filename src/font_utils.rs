@@ -3,6 +3,7 @@ pub fn get_font_family(font_id: Option<i32>) -> &'static str {
     match font_id {
         Some(2 | 9) => "Liberation Sans", // Helvetica or Liberation Sans
         Some(3) => "Cascadia Code",
+        Some(8) => "Comic Shanns",
         _ => "Excalifont", // ID 5, legacy Virgil (1), or any unavailable font
     }
 }
@@ -50,6 +51,7 @@ pub(crate) fn text_metrics(family: &str, size: f64, line_height: Option<f64>) ->
     let (units_per_em, ascent, descent, default_line_height) = match family {
         "Liberation Sans" => (2048.0, 1854.0, 434.0, 1.15),
         "Cascadia Code" => (2048.0, 1900.0, 480.0, 1.2),
+        "Comic Shanns" => (1000.0, 750.0, 250.0, 1.25),
         _ => (1000.0, 886.0, 374.0, 1.25),
     };
     let height = line_height.unwrap_or(default_line_height) * size;

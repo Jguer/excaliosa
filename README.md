@@ -97,7 +97,13 @@ excaliosa path/to/diagram.json -o diagram.svg
 
 ### Text and fonts
 
-SVG exports embed Excalifont and Cascadia Code once per used face, with sans-serif and monospace fallbacks respectively. The complete TTF files are base64-encoded without subsetting, adding about 250 KiB for Excalifont and 959 KiB for Cascadia Code to the SVG. Liberation Sans is named with a sans-serif fallback but is not embedded: its bundled font metadata permits embedding but refers to an external license rather than containing the complete notice. Excalifont and Cascadia Code include their copyright and SIL Open Font License notices in the embedded font metadata.
+SVG exports embed Excalifont, Cascadia Code, and Comic Shanns once per used face, with sans-serif, monospace, and monospace fallbacks respectively. The complete TTF files are base64-encoded without subsetting, adding about 250 KiB for Excalifont, 959 KiB for Cascadia Code, and 66 KiB for Comic Shanns to the SVG. Liberation Sans is named with a sans-serif fallback but is not embedded: its bundled font metadata permits embedding but refers to an external license rather than containing the complete notice. Excalifont and Cascadia Code include their copyright and SIL Open Font License notices in the embedded font metadata. Comic Shanns includes its complete MIT notice, also stored in `fonts/ComicShanns-Regular-LICENSE.txt`, and permits installable embedding (`fsType = 0`).
+
+The bundled Comic Shanns 1.3.0 face was generated offline from Excalidraw's [`ComicShanns-Regular.sfd`](https://github.com/excalidraw/excalidraw/blob/dabd83c4aa6b9e42d0dd0a42be62200eb8e3cce9/packages/excalidraw/fonts/ComicShanns/ComicShanns-Regular.sfd), whose SHA-256 is `ccb87f5dda14ae0800b57d1052e4b9faddda8b2d4a1aeb2e28e6cb11722539fe`. Its 333-character map exactly matches all four declared upstream WOFF2 ranges. The shipped TTF SHA-256 is `8f9b5f5250dd2bfa07476f8c81672cdd0977cb99df79225e0ea2e0ff7bd9aed5`. To reproduce the conversion, put that pinned SFD in the working directory and use FontForge 20230101 (Debian package `1:20230101~dfsg-4+b1`, sources from 2025-01-07):
+
+```bash
+fontforge -lang=ff -c 'Open("ComicShanns-Regular.sfd"); Generate("fonts/ComicShanns-Regular.ttf")'
+```
 
 Both exports preserve saved lines and explicit line heights; SVG also records left-to-right or right-to-left direction and logical text anchors. PNG uses bundled fonts for simple per-character glyph outlining, but does not perform complex text shaping, bidirectional reordering, emoji fallback, or SVG-style font fallback. Unsupported printable glyphs use the selected font's notdef glyph.
 

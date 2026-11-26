@@ -1,3 +1,4 @@
+use crate::arrow_utils::cubic_point;
 use crate::models::ExcalidrawElement;
 
 use super::{PaintedPath, PathOp};
@@ -51,6 +52,60 @@ pub(crate) struct LinearMeasurement {
 }
 
 pub(crate) type LinearMeasurements = std::collections::HashMap<usize, LinearMeasurement>;
+
+/// Return (tail, tip) from the first or last drawable segment in a shaft outline.
+pub(crate) fn generated_cap_direction(
+    ops: &[PathOp],
+    position: &str,
+) -> Option<(f64, f64, f64, f64)> {
+    #[derive(Clone, Copy)]
+    enum Segment {
+        Line((f64, f64), (f64, f64)),
+        Cubic((f64, f64), (f64, f64), (f64, f64), (f64, f64)),
+    }
+
+    let mut current = None;
+    let mut first = None;
+    let mut last = None;
+    for op in ops {
+        match *op {
+            PathOp::Move(x, y) => current = Some((x, y)),
+            PathOp::Line(x, y) => {
+                if let Some(start) = current {
+                    let segment = Segment::Line(start, (x, y));
+                    first.get_or_insert(segment);
+                    last = Some(segment);
+                }
+                current = Some((x, y));
+            }
+            PathOp::Cubic(x1, y1, x2, y2, x3, y3) => {
+                if let Some(p0) = current {
+                    let segment = Segment::Cubic(p0, (x1, y1), (x2, y2), (x3, y3));
+                    first.get_or_insert(segment);
+                    last = Some(segment);
+                }
+                current = Some((x3, y3));
+            }
+            PathOp::Close => current = None,
+        }
+    }
+
+    let (tail, tip) = match if position == "start" { first } else { last }? {
+        Segment::Line(p0, p1) => {
+            if position == "start" {
+                (p1, p0)
+            } else {
+                (p0, p1)
+            }
+        }
+        Segment::Cubic(p0, p1, p2, p3) => (
+            cubic_point(p0, p1, p2, p3, 0.7),
+            if position == "start" { p0 } else { p3 },
+        ),
+    };
+    let length = (tip.0 - tail.0).hypot(tip.1 - tail.1);
+    (length.is_finite() && length > 0.0).then_some((tail.0, tail.1, tip.0, tip.1))
+}
 
 /// Measure only the shaft outline. Raw points and then the stored box provide
 /// finite fallbacks for empty or non-finite generated paths.
@@ -253,6 +308,91 @@ mod tests {
 
     fn path(ops: Vec<PathOp>) -> PaintedPath {
         PaintedPath::stroke_only(ops, Rgba(0, 0, 0, 255), 1.0)
+    }
+
+    #[test]
+    fn cubic_cap_direction_samples_conventional_point_zero_seven() {
+        let p0 = (0.0, 0.0);
+        let p1 = (100.0, 0.0);
+        let p2 = (0.0, 100.0);
+        let p3 = (100.0, 100.0);
+        let ops = [
+            PathOp::Move(p0.0, p0.1),
+            PathOp::Cubic(p1.0, p1.1, p2.0, p2.1, p3.0, p3.1),
+        ];
+        let sample = cubic_point(p0, p1, p2, p3, 0.7);
+        let other_sample = cubic_point(p0, p1, p2, p3, 0.3);
+        let start = generated_cap_direction(&ops, "start").unwrap();
+        let end = generated_cap_direction(&ops, "end").unwrap();
+        assert_eq!(start, (sample.0, sample.1, p0.0, p0.1));
+        assert_eq!(end, (sample.0, sample.1, p3.0, p3.1));
+
+        let cross = |a: (f64, f64), b: (f64, f64)| a.0 * b.1 - a.1 * b.0;
+        let start_direction = (p0.0 - sample.0, p0.1 - sample.1);
+        let end_direction = (p3.0 - sample.0, p3.1 - sample.1);
+        assert!(
+            cross(
+                start_direction,
+                (p0.0 - other_sample.0, p0.1 - other_sample.1)
+            )
+            .abs()
+                > 1e-8
+        );
+        assert!(
+            cross(
+                end_direction,
+                (p3.0 - other_sample.0, p3.1 - other_sample.1)
+            )
+            .abs()
+                > 1e-8
+        );
+        assert!(cross(start_direction, (100.0, 0.0)).abs() > 1e-8);
+        assert!(cross(end_direction, (100.0, 0.0)).abs() > 1e-8);
+    }
+
+    #[test]
+    fn cap_direction_uses_outer_segments_and_resets_at_moves() {
+        let ops = [
+            PathOp::Move(0.0, 0.0),
+            PathOp::Line(10.0, 0.0),
+            PathOp::Move(50.0, 50.0),
+            PathOp::Move(100.0, 100.0),
+            PathOp::Cubic(110.0, 100.0, 110.0, 120.0, 120.0, 120.0),
+        ];
+        assert_eq!(
+            generated_cap_direction(&ops, "start"),
+            Some((10.0, 0.0, 0.0, 0.0))
+        );
+        let sample = cubic_point(
+            (100.0, 100.0),
+            (110.0, 100.0),
+            (110.0, 120.0),
+            (120.0, 120.0),
+            0.7,
+        );
+        assert_eq!(
+            generated_cap_direction(&ops, "end"),
+            Some((sample.0, sample.1, 120.0, 120.0))
+        );
+    }
+
+    #[test]
+    fn invalid_terminal_segments_do_not_select_an_interior_segment() {
+        let degenerate = [PathOp::Move(1.0, 2.0), PathOp::Line(1.0, 2.0)];
+        assert_eq!(generated_cap_direction(&degenerate, "start"), None);
+        assert_eq!(generated_cap_direction(&[], "end"), None);
+
+        let non_finite_end = [
+            PathOp::Move(0.0, 0.0),
+            PathOp::Line(10.0, 0.0),
+            PathOp::Move(20.0, 20.0),
+            PathOp::Line(f64::NAN, 20.0),
+        ];
+        assert_eq!(generated_cap_direction(&non_finite_end, "end"), None);
+        assert_eq!(
+            generated_cap_direction(&non_finite_end, "start"),
+            Some((10.0, 0.0, 0.0, 0.0))
+        );
     }
 
     #[test]

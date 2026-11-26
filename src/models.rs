@@ -31,6 +31,13 @@ where
     Ok(Option::<Vec<f64>>::deserialize(deserializer).unwrap_or_default())
 }
 
+fn deserialize_created<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<serde_json::Value>::deserialize(deserializer)?.and_then(|value| value.as_f64()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ExcalidrawElement {
@@ -84,6 +91,7 @@ pub struct ExcalidrawElement {
     pub simulate_pressure: bool,
     pub stroke_options: Option<StrokeOptions>,
     // Sticky-note creation timestamp in milliseconds since the Unix epoch.
+    #[serde(default, deserialize_with = "deserialize_created")]
     pub created: Option<f64>,
     // Image element fields (type="image")
     pub file_id: Option<String>,

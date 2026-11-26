@@ -100,11 +100,7 @@ pub fn render_to_png(
         };
 
         match &drawable.primitive {
-            Primitive::Paths(paths) => {
-                for pp in paths {
-                    draw_painted(&mut pixmap, pp, tf, drawable.opacity);
-                }
-            }
+            Primitive::Paths(paths) => draw_paths(&mut pixmap, paths, tf, drawable.opacity),
             Primitive::Text(text) => draw_text(&mut pixmap, text, tf, drawable.opacity),
             Primitive::Image(image) => draw_image(&mut pixmap, image, tf, drawable.opacity)
                 .context("Failed to render embedded PNG image")?,
@@ -119,13 +115,83 @@ pub fn render_to_png(
 // Paths
 // ---------------------------------------------------------------------------
 
-fn draw_painted(pixmap: &mut Pixmap, pp: &PaintedPath, transform: Transform, opacity: f64) {
+fn draw_paths(pixmap: &mut Pixmap, paths: &[PaintedPath], transform: Transform, opacity: f64) {
+    if opacity <= 0.0 {
+        return;
+    }
+    if opacity >= 1.0 {
+        for path in paths {
+            draw_painted(pixmap, path, transform);
+        }
+        return;
+    }
+
+    // Composite overlapping paths before applying element opacity, as SVG groups do.
+    let mut bounds: Option<Rect> = None;
+    for pp in paths {
+        let Some(path) = build_path(&pp.ops) else {
+            continue;
+        };
+        let padding = if pp.stroke.is_some() && pp.stroke_width > 0.0 {
+            pp.stroke_width as f32 / 2.0 + 1.0
+        } else {
+            1.0
+        };
+        let Some(path_bounds) = path.bounds().outset(padding, padding) else {
+            continue;
+        };
+        let Some(path_bounds) = path_bounds.transform(transform) else {
+            continue;
+        };
+        bounds = Some(match bounds {
+            Some(current) => Rect::from_ltrb(
+                current.left().min(path_bounds.left()),
+                current.top().min(path_bounds.top()),
+                current.right().max(path_bounds.right()),
+                current.bottom().max(path_bounds.bottom()),
+            )
+            .unwrap_or(current),
+            None => path_bounds,
+        });
+    }
+    let Some(bounds) = bounds else {
+        return;
+    };
+    let left = bounds.left().floor().max(0.0) as i32;
+    let top = bounds.top().floor().max(0.0) as i32;
+    let right = bounds.right().ceil().min(pixmap.width() as f32) as i32;
+    let bottom = bounds.bottom().ceil().min(pixmap.height() as f32) as i32;
+    if left >= right || top >= bottom {
+        return;
+    }
+    let Some(mut layer) = Pixmap::new((right - left) as u32, (bottom - top) as u32) else {
+        return;
+    };
+    let layer_transform = transform.post_translate(-left as f32, -top as f32);
+    for path in paths {
+        draw_painted(&mut layer, path, layer_transform);
+    }
+    let paint = PixmapPaint {
+        opacity: opacity as f32,
+        ..PixmapPaint::default()
+    };
+    pixmap.draw_pixmap(
+        left,
+        top,
+        layer.as_ref(),
+        &paint,
+        Transform::identity(),
+        None,
+    );
+}
+
+fn draw_painted(pixmap: &mut Pixmap, pp: &PaintedPath, transform: Transform) {
     let Some(path) = build_path(&pp.ops) else {
         return;
     };
 
     if let Some(fill) = pp.fill {
-        let (r, g, b, a) = apply_opacity(fill, opacity);
+        let (r, g, b, a) = (fill.0, fill.1, fill.2, fill.3);
         if a > 0 {
             let mut paint = Paint::default();
             paint.set_color_rgba8(r, g, b, a);
@@ -140,7 +206,7 @@ fn draw_painted(pixmap: &mut Pixmap, pp: &PaintedPath, transform: Transform, opa
     }
 
     if let Some(stroke) = pp.stroke {
-        let (r, g, b, a) = apply_opacity(stroke, opacity);
+        let (r, g, b, a) = (stroke.0, stroke.1, stroke.2, stroke.3);
         if a > 0 && pp.stroke_width > 0.0 {
             let mut paint = Paint::default();
             paint.set_color_rgba8(r, g, b, a);

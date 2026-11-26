@@ -14,7 +14,10 @@ const STICKY_NOTE_FOOTER_FONT_SIZE: f64 = 12.0;
 const STICKY_NOTE_FOOTER_BASELINE_FROM_BOTTOM: f64 = 14.0;
 const STICKY_NOTE_FOOTER_MIN_BODY_WIDTH_FOR_YEAR: f64 = 80.0;
 
-pub(super) fn build_sticky_note(el: &ExcalidrawElement) -> Vec<Drawable> {
+pub(super) fn build_sticky_note(
+    el: &ExcalidrawElement,
+    label: Option<&ExcalidrawElement>,
+) -> Vec<Drawable> {
     let shadow = sticky_note_path(el, true);
     let paper = sticky_note_path(el, false);
     let mut background = Rgba::from_tuple(parse_color(&el.background_color));
@@ -43,19 +46,14 @@ pub(super) fn build_sticky_note(el: &ExcalidrawElement) -> Vec<Drawable> {
         PaintedPath::stroke_only(paper, Rgba(0, 0, 0, 20), 1.0),
     ];
     let mut drawables = vec![drawable(el, Primitive::Paths(paths))];
-    if let Some(footer) = sticky_note_footer(el) {
+    if let Some(footer) = sticky_note_footer(el, label) {
         drawables.push(drawable(el, Primitive::Text(footer)));
     }
     drawables
 }
 
-pub(super) fn build_embed(el: &ExcalidrawElement) -> Vec<Drawable> {
-    let mut rectangle = el.clone();
-    rectangle.element_type = "rectangle".to_string();
-    let mut drawables = vec![drawable(
-        el,
-        Primitive::Paths(build_shape(&Generator::default(), &rectangle)),
-    )];
+pub(super) fn build_embed(generator: &Generator, el: &ExcalidrawElement) -> Vec<Drawable> {
+    let mut drawables = vec![drawable(el, Primitive::Paths(build_shape(generator, el)))];
     if let Some(label) = embed_label(el) {
         drawables.push(drawable(el, Primitive::Text(label)));
     }
@@ -70,7 +68,13 @@ fn embed_label(el: &ExcalidrawElement) -> Option<TextPrimitive> {
             None | Some("") => "Empty Web-Embed".to_string(),
             Some(link) => link
                 .chars()
-                .map(|c| if c.is_control() { ' ' } else { c })
+                .map(|c| {
+                    if c.is_control() || matches!(c, '\u{fffe}' | '\u{ffff}') {
+                        ' '
+                    } else {
+                        c
+                    }
+                })
                 .collect::<String>()
                 .split_whitespace()
                 .collect::<Vec<_>>()
@@ -305,8 +309,21 @@ impl SeededRandom {
     }
 }
 
-fn sticky_note_footer(el: &ExcalidrawElement) -> Option<TextPrimitive> {
+fn sticky_note_footer(
+    el: &ExcalidrawElement,
+    label: Option<&ExcalidrawElement>,
+) -> Option<TextPrimitive> {
     if el.width < STICKY_NOTE_MIN_SIZE || el.height < STICKY_NOTE_MIN_SIZE {
+        return None;
+    }
+    let footer_top =
+        el.y + el.height - STICKY_NOTE_FOOTER_BASELINE_FROM_BOTTOM - STICKY_NOTE_FOOTER_FONT_SIZE;
+    if label.is_some_and(|label| {
+        label.x < el.x + el.width
+            && label.x + label.width > el.x
+            && label.y < el.y + el.height
+            && label.y + label.height > footer_top
+    }) {
         return None;
     }
     let short = el.width - STICKY_NOTE_PADDING * 2.0 < STICKY_NOTE_FOOTER_MIN_BODY_WIDTH_FOR_YEAR;
@@ -386,12 +403,15 @@ mod tests {
             created: Some(0.0),
             ..Default::default()
         };
-        assert_eq!(sticky_note_footer(&note).unwrap().content, "1 Jan");
+        assert_eq!(sticky_note_footer(&note, None).unwrap().content, "1 Jan");
         let mut wide = note.clone();
         wide.width = 200.0;
-        assert_eq!(sticky_note_footer(&wide).unwrap().content, "1 Jan 1970");
+        assert_eq!(
+            sticky_note_footer(&wide, None).unwrap().content,
+            "1 Jan 1970"
+        );
         wide.height = 74.0;
-        assert!(sticky_note_footer(&wide).is_none());
+        assert!(sticky_note_footer(&wide, None).is_none());
     }
 
     #[test]

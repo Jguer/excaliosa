@@ -40,33 +40,39 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
     let generator = Generator::default();
     let mut unsupported = 0;
 
-    let sticky_labels: HashMap<&str, &ExcalidrawElement> = data
+    let sticky_labels: HashMap<usize, usize> = data
         .elements
         .iter()
-        .filter(|el| !el.is_deleted && el.element_type == "stickynote")
-        .filter_map(|note| {
-            sticky_bound_text(note, &data.elements).map(|text| (note.id.as_str(), text))
+        .enumerate()
+        .filter(|(_, el)| !el.is_deleted && el.element_type == "stickynote")
+        .filter_map(|(index, _)| {
+            sticky_bound_text(index, &data.elements).map(|text_index| (index, text_index))
         })
         .collect();
-    let sticky_text_ids: HashSet<&str> = sticky_labels
-        .values()
-        .map(|text| text.id.as_str())
-        .collect();
+    let sticky_text_indices: HashSet<usize> = sticky_labels.values().copied().collect();
     let mut drawables = Vec::new();
     let mut embeds = Vec::new();
 
-    for el in data.elements.iter().filter(|el| !el.is_deleted) {
+    for (index, el) in data
+        .elements
+        .iter()
+        .enumerate()
+        .filter(|(_, el)| !el.is_deleted)
+    {
         unsupported += usize::from(!contributes_bounds(&el.element_type));
         if matches!(el.element_type.as_str(), "iframe" | "embeddable") {
-            embeds.extend(build_embed(el));
+            embeds.extend(build_embed(&generator, el));
         } else if el.element_type == "stickynote" {
-            drawables.extend(build_sticky_note(el));
-            if let Some(text) = sticky_labels.get(el.id.as_str())
+            let text = sticky_labels
+                .get(&index)
+                .map(|text_index| &data.elements[*text_index]);
+            drawables.extend(build_sticky_note(el, text));
+            if let Some(text) = text
                 && let Some(label) = build_element(&generator, text, &data.files, background)
             {
                 drawables.push(label);
             }
-        } else if !sticky_text_ids.contains(el.id.as_str())
+        } else if !sticky_text_indices.contains(&index)
             && let Some(drawable) = build_element(&generator, el, &data.files, background)
         {
             drawables.push(drawable);
@@ -107,23 +113,32 @@ fn build_element(
     Some(drawable(el, primitive))
 }
 
-fn sticky_bound_text<'a>(
-    note: &ExcalidrawElement,
-    elements: &'a [ExcalidrawElement],
-) -> Option<&'a ExcalidrawElement> {
-    let text_id = note
+fn sticky_bound_text(note_index: usize, elements: &[ExcalidrawElement]) -> Option<usize> {
+    let note = &elements[note_index];
+    let mut bindings = note
         .bound_elements
         .as_ref()?
         .iter()
-        .find(|bound| bound.element_type == "text")?
-        .id
-        .as_str();
-    elements.iter().find(|text| {
+        .filter(|bound| bound.element_type == "text");
+    let text_id = bindings.next()?.id.as_str();
+    if bindings.next().is_some()
+        || elements
+            .iter()
+            .filter(|el| !el.is_deleted && el.element_type == "stickynote" && el.id == note.id)
+            .count()
+            != 1
+    {
+        return None;
+    }
+
+    let mut matches = elements.iter().enumerate().filter(|(_, text)| {
         !text.is_deleted
             && text.element_type == "text"
             && text.id == text_id
             && text.container_id.as_deref() == Some(note.id.as_str())
-    })
+    });
+    let (text_index, _) = matches.next()?;
+    matches.next().is_none().then_some(text_index)
 }
 
 pub(super) fn drawable(el: &ExcalidrawElement, primitive: Primitive) -> Drawable {
@@ -165,7 +180,7 @@ pub(super) fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<
     };
 
     let drawable = match el.element_type.as_str() {
-        "rectangle" => {
+        "rectangle" | "iframe" | "embeddable" => {
             let radius = if el.roundness.is_some() {
                 get_corner_radius(el.width.min(el.height), el)
             } else {

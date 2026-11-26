@@ -1,0 +1,32 @@
+name: excaliosa
+arch: ${PACKAGE_ARCH}
+version: ${PACKAGE_VERSION}
+maintainer: Jo <git@jguer.space>
+section: utils
+description: Convert Excalidraw JSON diagrams to PNG or SVG.
+homepage: https://github.com/Jguer/excaliosa
+license: MIT AND OFL-1.1
+contents:
+  - src: ${PACKAGE_BINARY}
+    dst: /usr/bin/excaliosa
+    expand: true
+    file_info:
+      mode: 0755
+  - src: LICENSE
+    dst: /usr/share/doc/excaliosa/copyright
+    packager: deb
+  - src: fonts/*-LICENSE.txt
+    dst: /usr/share/doc/excaliosa/
+    packager: deb
+  - src: LICENSE
+    dst: /usr/share/licenses/excaliosa/LICENSE
+    type: license
+    packager: rpm
+  - src: fonts/ComicShanns-Regular-LICENSE.txt
+    dst: /usr/share/licenses/excaliosa/ComicShanns-Regular-LICENSE.txt
+    type: license
+    packager: rpm
+  - src: fonts/LiberationSans-LICENSE.txt
+    dst: /usr/share/licenses/excaliosa/LiberationSans-LICENSE.txt
+    type: license
+    packager: rpm

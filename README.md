@@ -46,6 +46,19 @@ Excaliosa is a Rust CLI for turning Excalidraw JSON into PNG or SVG without a br
 
 ## Installation
 
+### Prebuilt binaries
+
+Download the package for your system from [GitHub Releases](https://github.com/Jguer/excaliosa/releases).
+
+| System | Formats | Architectures |
+| --- | --- | --- |
+| Linux | `.deb`, `.rpm`, `.tar.gz` | amd64, arm64 |
+| macOS | `.tar.gz` | amd64 (Intel), arm64 (Apple Silicon) |
+
+Install the Linux package with `sudo apt install ./<package>.deb` or `sudo dnf install ./<package>.rpm`.
+For a tarball, extract it and put the `excaliosa` binary on your `PATH`.
+Each release includes a `SHA256SUMS` file for verifying downloads.
+
 ### Build from source
 
 Use a current stable Rust toolchain. `Cargo.toml` selects edition 2024 and does not declare a separate `rust-version`/MSRV.
@@ -178,7 +191,7 @@ Excalidraw numeric font IDs map to bundled substitutes as follows:
 | Excalidraw ID | Source face | Bundled family | Embedded in SVG | License and notice |
 | --- | --- | --- | --- | --- |
 | `1`, `5`, or unavailable/unknown IDs | Virgil, Excalifont, or an unavailable face | Excalifont | Yes, with `sans-serif` fallback | SIL Open Font License 1.1; copyright and complete notice are in the font metadata. |
-| `2`, `9` | Helvetica or Liberation Sans | Liberation Sans | No; uses the named family with `sans-serif` fallback | Font metadata permits embedding but refers to an external Ascender license rather than containing the complete notice. |
+| `2`, `9` | Helvetica or Liberation Sans | Liberation Sans | No, uses the named family with `sans-serif` fallback | [Liberation Fonts 2.1.5](https://github.com/liberationfonts/liberation-fonts/releases/tag/2.1.5), distributed under the [SIL Open Font License 1.1](fonts/LiberationSans-LICENSE.txt). |
 | `3` | Cascadia | Cascadia Code | Yes, with `monospace` fallback | SIL Open Font License; copyright and complete notice are in the font metadata. |
 | `8` | Comic Shanns | Comic Shanns | Yes, with `monospace` fallback | MIT; the complete notice is in the font metadata and [`fonts/ComicShanns-Regular-LICENSE.txt`](fonts/ComicShanns-Regular-LICENSE.txt). |
 
@@ -224,6 +237,12 @@ cargo clippy -- -D warnings
 Unit and integration tests cover import compatibility, geometry, arrowheads and cardinality, labels, frames, freedraw, static elements, image cropping and reuse, named colors, SVG links, fonts, and output safety. Focused Excalidraw JSON documents live in [`tests/fixtures/`](tests/fixtures/); additional sample diagrams are in [`examples/`](examples/).
 
 The Rust workflow builds, runs all tests, and runs the CLI smoke test for pushes to `main` and pull requests targeting `main`. Keep changes formatted and warning-free with `make fmt` and `make lint`.
+
+### Publishing a release
+
+Update `Cargo.toml` and `Cargo.lock`, then push a matching tag from a commit that includes the release workflow. `v0.5.0` publishes version `0.5.0`, and `v0.5.0-rc.1` publishes a prerelease.
+
+For optional macOS Developer ID signing, export a **Developer ID Application** certificate and its private key as a password-protected `.p12`. Set the Actions secrets `MACOS_CERTIFICATE` to the base64-encoded `.p12` and `MACOS_CERTIFICATE_PASSWORD` to its password. With both secrets absent, the workflow packages the executable as built by Rust. Gatekeeper can still block a downloaded executable without Apple notarization.
 
 ## Contributing
 

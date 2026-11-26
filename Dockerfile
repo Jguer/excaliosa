@@ -24,6 +24,7 @@ RUN addgroup -S app && adduser -S -G app -u 10001 appuser
 
 # Copy the compiled binary
 COPY --from=builder /out/excaliosa /usr/local/bin/excaliosa
+COPY LICENSE fonts/*-LICENSE.txt /usr/share/licenses/excaliosa/
 
 USER appuser
 ENTRYPOINT ["/usr/local/bin/excaliosa"]

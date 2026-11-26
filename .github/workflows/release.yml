@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-amd64
+            target: x86_64-unknown-linux-musl
+            arch: amd64
+            nfpm_arch: x86_64
+            nfpm_sha256: 0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+            target: aarch64-unknown-linux-musl
+            arch: arm64
+            nfpm_arch: arm64
+            nfpm_sha256: 1c0f5f2999b9a974bfb04fdb0cc3306096de530ac5dbb25d739cc5f5219c919c
+          - runner: macos-15-intel
+            platform: macos-amd64
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            platform: macos-arm64
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    env:
+      TARGET: ${{ matrix.target }}
+      PACKAGE_NAME: excaliosa-${{ github.ref_name }}-${{ matrix.platform }}
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate version
+        run: |
+          version=$(cargo metadata --locked --no-deps --format-version 1 | jq -er '.packages[] | select(.name == "excaliosa") | .version')
+          if [[ "$GITHUB_REF_NAME" != "v$version" || "$version" == *+* ]]; then
+            echo "Release tag must match Cargo.toml as v$version, without build metadata." >&2
+            exit 1
+          fi
+
+      - name: Test and build
+        run: |
+          rustup target add "$TARGET"
+          cargo test --locked --target "$TARGET"
+          cargo build --locked --release --target "$TARGET"
+
+      - name: Sign macOS executable
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -z "$MACOS_CERTIFICATE" && -z "$MACOS_CERTIFICATE_PASSWORD" ]]; then
+            echo 'Developer ID signing is optional. No signing credentials are configured.'
+            exit 0
+          fi
+          : "${MACOS_CERTIFICATE:?Set MACOS_CERTIFICATE}" "${MACOS_CERTIFICATE_PASSWORD:?Set MACOS_CERTIFICATE_PASSWORD}"
+
+          signing_dir=$(mktemp -d "$RUNNER_TEMP/excaliosa-signing.XXXXXX")
+          keychain="$signing_dir/signing.keychain-db"
+          trap 'security delete-keychain "$keychain" >/dev/null 2>&1 || true; rm -rf "$signing_dir"' EXIT
+          keychain_password=$(openssl rand -hex 32)
+          printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$signing_dir/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$signing_dir/certificate.p12" -k "$keychain" -t cert -f pkcs12 \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk '/"Developer ID Application:/ { print $2 }')
+          if [[ ! "$identity" =~ ^[[:xdigit:]]{40}$ ]]; then
+            echo 'The certificate export must contain one valid Developer ID Application signing identity.' >&2
+            exit 1
+          fi
+          binary="target/$TARGET/release/excaliosa"
+          codesign --keychain "$keychain" --sign "$identity" --options runtime --timestamp --force "$binary"
+          codesign --verify --strict "$binary"
+
+      - name: Package tarball
+        run: |
+          staging="target/package/$PACKAGE_NAME"
+          mkdir -p dist "$staging"
+          install -m 755 "target/$TARGET/release/excaliosa" "$staging/excaliosa"
+          cp LICENSE fonts/*-LICENSE.txt "$staging/"
+          "$staging/excaliosa" --help >/dev/null
+          tar -czf "dist/$PACKAGE_NAME.tar.gz" -C target/package "$PACKAGE_NAME"
+
+      - name: Package DEB and RPM
+        if: runner.os == 'Linux'
+        env:
+          PACKAGE_ARCH: ${{ matrix.arch }}
+          NFPM_ARCH: ${{ matrix.nfpm_arch }}
+          NFPM_SHA256: ${{ matrix.nfpm_sha256 }}
+          NFPM_VERSION: '2.47.0'
+        run: |
+          tool_dir=$(mktemp -d)
+          archive="nfpm_${NFPM_VERSION}_Linux_${NFPM_ARCH}.tar.gz"
+          curl --fail --silent --show-error --location \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/$archive" \
+            -o "$tool_dir/$archive"
+          printf '%s  %s\n' "$NFPM_SHA256" "$tool_dir/$archive" | sha256sum --check
+          tar -xzf "$tool_dir/$archive" -C "$tool_dir" nfpm
+
+          export PACKAGE_VERSION="${GITHUB_REF_NAME#v}"
+          export PACKAGE_BINARY="target/$TARGET/release/excaliosa"
+          "$tool_dir/nfpm" package --config .github/nfpm.yaml --packager deb --target "dist/$PACKAGE_NAME.deb"
+          "$tool_dir/nfpm" package --config .github/nfpm.yaml --packager rpm --target "dist/$PACKAGE_NAME.rpm"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish GitHub release
+        working-directory: dist
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          packages=(
+            "excaliosa-$GITHUB_REF_NAME"-linux-{amd64,arm64}.{deb,rpm,tar.gz}
+            "excaliosa-$GITHUB_REF_NAME"-macos-{amd64,arm64}.tar.gz
+          )
+          sha256sum -- "${packages[@]}" > SHA256SUMS
+          flags=(--verify-tag --generate-notes)
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" "${packages[@]}" SHA256SUMS

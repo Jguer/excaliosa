@@ -10,7 +10,7 @@ use palette::Srgba;
 use roughr::core::{Drawable as RoughDrawable, FillStyle, OpSet, OpSetType, OpType, Options};
 use roughr::generator::Generator;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::arrow_utils::{calc_arrowhead_points, build_elbow_arrow_path, calculate_arrowhead_direction};
 use crate::color_utils::{fill_color, has_stroke, parse_color};
@@ -24,6 +24,7 @@ use crate::stroke_utils::get_stroke_dash_array;
 use crate::utils::{calculate_viewbox, contributes_bounds};
 
 use super::freedraw;
+use super::static_elements::{build_embed, build_sticky_note};
 use super::{
     Drawable, ImageCrop, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, Scene, TextAlign,
     TextPrimitive,
@@ -39,15 +40,46 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
     let generator = Generator::default();
     let mut unsupported = 0;
 
-    let drawables = data
+    let sticky_labels: HashMap<usize, usize> = data
         .elements
         .iter()
-        .filter(|el| !el.is_deleted)
-        .filter_map(|el| {
-            unsupported += usize::from(!contributes_bounds(&el.element_type));
-            build_element(&generator, el, &data.files, background)
+        .enumerate()
+        .filter(|(_, el)| !el.is_deleted && el.element_type == "stickynote")
+        .filter_map(|(index, _)| {
+            sticky_bound_text(index, &data.elements).map(|text_index| (index, text_index))
         })
         .collect();
+    let sticky_text_indices: HashSet<usize> = sticky_labels.values().copied().collect();
+    let mut drawables = Vec::new();
+    let mut embeds = Vec::new();
+
+    for (index, el) in data
+        .elements
+        .iter()
+        .enumerate()
+        .filter(|(_, el)| !el.is_deleted)
+    {
+        unsupported += usize::from(!contributes_bounds(&el.element_type));
+        if matches!(el.element_type.as_str(), "iframe" | "embeddable") {
+            embeds.extend(build_embed(&generator, el));
+        } else if el.element_type == "stickynote" {
+            let text = sticky_labels
+                .get(&index)
+                .map(|text_index| &data.elements[*text_index]);
+            drawables.extend(build_sticky_note(el, text));
+            if let Some(text) = text
+                && let Some(label) = build_element(&generator, text, &data.files, background)
+            {
+                drawables.push(label);
+            }
+        } else if !sticky_text_indices.contains(&index)
+            && let Some(drawable) = build_element(&generator, el, &data.files, background)
+        {
+            drawables.push(drawable);
+        }
+    }
+    // Iframe-like placeholders always paint above ordinary scene elements.
+    drawables.extend(embeds);
     if unsupported > 0 {
         use std::io::Write;
         let _ = writeln!(
@@ -69,16 +101,6 @@ fn build_element(
     files: &HashMap<String, Value>,
     background: Option<Rgba>,
 ) -> Option<Drawable> {
-    let opacity = (el.opacity / 100.0).clamp(0.0, 1.0);
-    let center = if el.element_type == "freedraw" {
-        freedraw::point_center(el)
-            .unwrap_or_else(|| calculate_center(el.x, el.y, el.width, el.height))
-    } else {
-        calculate_center(el.x, el.y, el.width, el.height)
-    };
-    // Excalidraw stores `angle` in radians; rotation transforms take degrees.
-    let rotation_deg = el.angle.to_degrees();
-
     let primitive = match el.element_type.as_str() {
         "rectangle" | "ellipse" | "diamond" => Primitive::Paths(build_shape(generator, el)),
         "line" | "arrow" => Primitive::Paths(build_line(generator, el, background)?),
@@ -88,20 +110,61 @@ fn build_element(
         _ => return None,
     };
 
-    Some(Drawable {
+    let mut drawable = drawable(el, primitive);
+    drawable.link = el.link.clone();
+    Some(drawable)
+}
+
+fn sticky_bound_text(note_index: usize, elements: &[ExcalidrawElement]) -> Option<usize> {
+    let note = &elements[note_index];
+    let mut bindings = note
+        .bound_elements
+        .as_ref()?
+        .iter()
+        .filter(|bound| bound.element_type == "text");
+    let text_id = bindings.next()?.id.as_str();
+    if bindings.next().is_some()
+        || elements
+            .iter()
+            .filter(|el| !el.is_deleted && el.element_type == "stickynote" && el.id == note.id)
+            .count()
+            != 1
+    {
+        return None;
+    }
+
+    let mut matches = elements.iter().enumerate().filter(|(_, text)| {
+        !text.is_deleted
+            && text.element_type == "text"
+            && text.id == text_id
+            && text.container_id.as_deref() == Some(note.id.as_str())
+    });
+    let (text_index, _) = matches.next()?;
+    matches.next().is_none().then_some(text_index)
+}
+
+pub(super) fn drawable(el: &ExcalidrawElement, primitive: Primitive) -> Drawable {
+    let center = if el.element_type == "freedraw" {
+        freedraw::point_center(el)
+            .unwrap_or_else(|| calculate_center(el.x, el.y, el.width, el.height))
+    } else {
+        calculate_center(el.x, el.y, el.width, el.height)
+    };
+    // Excalidraw stores angles in radians; backends rotate in degrees.
+    Drawable {
         primitive,
-        link: el.link.clone(),
-        opacity,
-        rotation_deg,
+        link: None,
+        opacity: (el.opacity / 100.0).clamp(0.0, 1.0),
+        rotation_deg: el.angle.to_degrees(),
         center,
-    })
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Closed shapes: rectangle, ellipse, diamond
 // ---------------------------------------------------------------------------
 
-fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath> {
+pub(super) fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath> {
     let should_stroke = has_stroke(el);
     let stroke = should_stroke.then(|| Rgba::from_tuple(parse_color(&el.stroke_color)));
     let fill = fill_color(el).map(Rgba::from_tuple);
@@ -119,7 +182,7 @@ fn build_shape(generator: &Generator, el: &ExcalidrawElement) -> Vec<PaintedPath
     };
 
     let drawable = match el.element_type.as_str() {
-        "rectangle" => {
+        "rectangle" | "iframe" | "embeddable" => {
             let radius = if el.roundness.is_some() {
                 get_corner_radius(el.width.min(el.height), el)
             } else {

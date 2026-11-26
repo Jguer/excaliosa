@@ -135,6 +135,11 @@ excaliosa examples/logo.json --dpi 144 -o logo_144dpi.png
 excaliosa --help
 ```
 
+## Static element approximations
+
+- Sticky notes use deterministic seeded paper jitter, rounded or lifted corners, a simple edge shadow, and a UTC creation-date footer. Saved bound text keeps its stored layout; the footer omits the year on narrow notes and is omitted for invalid timestamps or notes smaller than 75 units.
+- Iframes and web embeds export as styled rectangles with escaped, conservatively truncated single-line labels. They never load remote resources or emit `foreignObject`, `srcdoc`, or embed-specific clickable markup.
+
 ## License
 
 MIT

@@ -4,6 +4,8 @@
 //! export matches the PNG output. Shapes are emitted as `<path>` elements (the
 //! roughr op-lists), text as `<text>`/`<tspan>`, and images as `<image>`.
 
+use std::net::Ipv4Addr;
+
 use crate::models::ExcalidrawData;
 use crate::scene::{
     build_scene, Drawable, ImagePrimitive, PaintedPath, PathOp, Primitive, Rgba, TextAlign,
@@ -73,6 +75,10 @@ fn render_drawable(drawable: &Drawable) -> String {
         format!("<g{attrs}>\n{inner}\n</g>")
     };
 
+    if drawable.opacity == 0.0 {
+        return rendered;
+    }
+
     match drawable.link.as_deref().and_then(safe_link_href) {
         Some(href) => format!("<a href=\"{}\">\n{rendered}\n</a>", escape_xml(href)),
         None => rendered,
@@ -82,7 +88,9 @@ fn render_drawable(drawable: &Drawable) -> String {
 fn safe_link_href(link: &str) -> Option<&str> {
     if link.is_empty()
         || link.chars().any(|c| {
-            c.is_control() || c.is_whitespace() || matches!(c, '\\' | '"' | '\'' | '<' | '>')
+            c.is_control()
+                || c.is_whitespace()
+                || matches!(c, '\u{fffe}' | '\u{ffff}' | '\\' | '"' | '\'' | '<' | '>')
         })
     {
         return None;
@@ -103,7 +111,7 @@ fn safe_link_href(link: &str) -> Option<&str> {
     (!local.is_empty()
         && local
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'%' | b'+' | b'-'))
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'-'))
         && !domain.contains('@')
         && valid_host(domain))
     .then_some(link)
@@ -137,8 +145,8 @@ fn valid_http_url(rest: &str) -> bool {
 }
 
 fn valid_host(host: &str) -> bool {
-    !host.is_empty()
-        && host.split('.').all(|label| {
+    if host.is_empty()
+        || !host.split('.').all(|label| {
             !label.is_empty()
                 && !label.starts_with('-')
                 && !label.ends_with('-')
@@ -146,6 +154,16 @@ fn valid_host(host: &str) -> bool {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-')
         })
+    {
+        return false;
+    }
+
+    let last = host.rsplit('.').next().unwrap_or_default();
+    let numeric = last.bytes().all(|b| b.is_ascii_digit())
+        || (last.len() >= 2
+            && last[..2].eq_ignore_ascii_case("0x")
+            && last[2..].bytes().all(|b| b.is_ascii_hexdigit()));
+    !numeric || host.parse::<Ipv4Addr>().is_ok()
 }
 
 fn path_svg(pp: &PaintedPath) -> String {

@@ -90,12 +90,16 @@ fn rejected_links_leave_exactly_the_same_svg_artwork() {
         "https://exa mple.com/",
         "https://example.com/\nonclick=alert(1)",
         "https://example.com/\u{0}",
+        "https://example.com/\u{fffe}",
+        "https://example.com/#\u{ffff}",
         "https://example.com/\" onclick=\"alert(1)",
         "https://example.com/' onclick='alert(1)",
         "https://example.com:invalid/",
         "https://:443/",
         "https://exa_mple.com/",
+        "https://192.0.513/",
         "mailto:not-an-address",
+        "mailto:user%@example.com",
         "mailto:user@@example.com",
         "mailto:user@example.com?subject=hello",
         "#",
@@ -104,6 +108,25 @@ fn rejected_links_leave_exactly_the_same_svg_artwork() {
         let actual = generate_svg(&rectangle_with_link(Some(link)), None);
         assert_eq!(actual, expected, "link should be rejected: {link:?}");
     }
+}
+
+#[test]
+fn standard_ipv4_hosts_remain_valid() {
+    let href = "https://192.0.2.1/";
+    let svg = generate_svg(&rectangle_with_link(Some(href)), None);
+    anchor_body(&svg, href);
+}
+
+#[test]
+fn zero_opacity_marks_keep_their_artwork_without_anchors() {
+    let mut linked = rectangle_with_link(Some("https://example.com/invisible"));
+    let mut unlinked = rectangle_with_link(None);
+    linked.elements[0].opacity = 0.0;
+    unlinked.elements[0].opacity = 0.0;
+
+    let actual = generate_svg(&linked, None);
+    assert_eq!(actual, generate_svg(&unlinked, None));
+    assert!(actual.contains("<g opacity=\"0.0000\">"), "{actual}");
 }
 
 #[test]

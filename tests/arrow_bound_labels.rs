@@ -348,6 +348,49 @@ fn render_pixel(
 }
 
 #[test]
+fn framed_linked_arrow_and_label_stay_unclipped_with_their_mask() {
+    let frame = ExcalidrawElement {
+        id: "frame".into(),
+        element_type: "frame".into(),
+        width: 100.0,
+        height: 100.0,
+        opacity: 50.0,
+        ..Default::default()
+    };
+    let mut arrow = arrow("arrow", 20.0, 120.0, vec![(0.0, 0.0), (200.0, 0.0)]);
+    arrow.frame_id = Some("frame".into());
+    arrow.link = Some("https://example.com".into());
+    let mut text = label("label", Some("arrow"), 1_000.0, 1_000.0);
+    text.frame_id = Some("frame".into());
+    bind(&mut arrow, &text);
+    let elements = vec![frame, arrow, text];
+
+    let scene = scene_for(elements.clone());
+    assert_eq!(scene.drawables.len(), 4);
+    let arrow_drawable = &scene.drawables[2];
+    let label_drawable = &scene.drawables[3];
+    assert!(arrow_drawable.label_gap.is_some());
+    assert!(arrow_drawable.frame_clip.is_none());
+    assert!(label_drawable.frame_clip.is_none());
+    assert_eq!(arrow_drawable.opacity, 0.5);
+    assert_eq!(label_drawable.opacity, 0.5);
+
+    let data: ExcalidrawData = serde_json::from_value(serde_json::json!({
+        "type": "excalidraw",
+        "elements": elements.clone(),
+    }))
+    .unwrap();
+    let svg = generate_svg(&data, Some((0, 0, 0, 0)));
+    assert!(svg.contains(
+        "<a href=\"https://example.com\">\n<g mask=\"url(#excaliosa-arrow-label-mask-2)\">"
+    ));
+    assert!(!svg.contains("excaliosa-frame-clip"));
+
+    let outside = render_pixel(elements, (0, 0, 0, 0), (190.0, 120.0));
+    assert!(outside[3] > 0, "frame must not clip the arrow");
+}
+
+#[test]
 fn png_gap_reveals_only_underlying_paint_and_later_marks_stay_later() {
     let make_arrow = || {
         let mut arrow = arrow("arrow", 50.0, 100.0, vec![(0.0, 0.0), (200.0, 0.0)]);

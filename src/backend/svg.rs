@@ -128,10 +128,11 @@ fn text_svg(t: &TextPrimitive) -> String {
         .collect();
 
     format!(
-        "<text font-size=\"{}\" font-family=\"{}\" fill=\"{}\" opacity=\"1\" text-anchor=\"{}\" dominant-baseline=\"alphabetic\">{}</text>",
+        "<text font-size=\"{}\" font-family=\"{}\" fill=\"{}\" fill-opacity=\"{:.4}\" text-anchor=\"{}\" dominant-baseline=\"alphabetic\">{}</text>",
         t.font_size,
         t.font_family,
         hex(t.color),
+        t.color.3 as f64 / 255.0,
         anchor,
         tspans
     )

@@ -17,8 +17,7 @@ use super::{Drawable, FrameClip, PaintedPath, PathOp, Primitive, Rgba, TextAlign
 const FRAME_RADIUS: f64 = 8.0;
 const FRAME_NAME_FONT_SIZE: f64 = 14.0;
 const FRAME_NAME_LINE_HEIGHT: f64 = 1.25;
-pub const FRAME_NAME_OFFSET_Y: f64 = 3.0;
-pub const FRAME_NAME_BAND_HEIGHT: f64 = FRAME_NAME_FONT_SIZE * FRAME_NAME_LINE_HEIGHT;
+const FRAME_NAME_OFFSET_Y: f64 = 3.0;
 
 pub fn containing_frame<'a>(
     element: &ExcalidrawElement,
@@ -42,7 +41,7 @@ pub fn frame_clip(
             .container_id
             .as_deref()
             .and_then(|id| elements.get(id))
-            .is_some_and(|container| container.element_type == "arrow");
+            .is_some_and(|container| !container.is_deleted && container.element_type == "arrow");
     if element.element_type == "arrow" || bound_to_arrow {
         return None;
     }
@@ -55,30 +54,15 @@ pub fn frame_clip(
 
 pub fn build_frame(element: &ExcalidrawElement) -> Vec<Drawable> {
     let mut drawables = Vec::with_capacity(2);
-    if let Some(name) = frame_name(element) {
-        let (line_height, baseline_offset) = text_metrics(
-            "Liberation Sans",
-            FRAME_NAME_FONT_SIZE,
-            Some(FRAME_NAME_LINE_HEIGHT),
-        );
+    if let Some(title) = frame_title(element) {
         drawables.push(Drawable {
-            primitive: Primitive::Text(TextPrimitive {
-                content: name,
-                x: element.x,
-                y: element.y - FRAME_NAME_OFFSET_Y - FRAME_NAME_BAND_HEIGHT,
-                baseline_offset,
-                font_size: FRAME_NAME_FONT_SIZE,
-                font_family: "Liberation Sans",
-                color: Rgba(153, 153, 153, 255),
-                align: TextAlign::Left,
-                line_height,
-                container_width: element.width.max(0.0),
-            }),
+            primitive: Primitive::Text(title),
             link: None,
             opacity: 1.0,
             rotation_deg: 0.0,
             center: (0.0, 0.0),
             frame_clip: None,
+            frame_opacity: None,
         });
     }
     drawables.push(Drawable {
@@ -101,8 +85,31 @@ pub fn build_frame(element: &ExcalidrawElement) -> Vec<Drawable> {
             element.y + element.height / 2.0,
         ),
         frame_clip: None,
+        frame_opacity: None,
     });
     drawables
+}
+
+pub(crate) fn frame_title(element: &ExcalidrawElement) -> Option<TextPrimitive> {
+    let name = frame_name(element)?;
+    let (line_height, baseline_offset) = text_metrics(
+        "Liberation Sans",
+        FRAME_NAME_FONT_SIZE,
+        Some(FRAME_NAME_LINE_HEIGHT),
+    );
+    let lines = name.split('\n').count() as f64;
+    Some(TextPrimitive {
+        content: name,
+        x: element.x,
+        y: element.y - FRAME_NAME_OFFSET_Y - line_height * lines,
+        baseline_offset,
+        font_size: FRAME_NAME_FONT_SIZE,
+        font_family: "Liberation Sans",
+        color: Rgba(153, 153, 153, 255),
+        align: TextAlign::Left,
+        line_height,
+        container_width: element.width.max(0.0),
+    })
 }
 
 fn frame_name(element: &ExcalidrawElement) -> Option<String> {
@@ -113,38 +120,52 @@ fn frame_name(element: &ExcalidrawElement) -> Option<String> {
             "Frame".to_owned()
         }
     });
-    let max_width = element.width.max(0.0);
-    if measure_text(&name) <= max_width {
-        return (!name.is_empty()).then_some(name);
+    if name.is_empty() {
+        return None;
     }
 
-    let chars: Vec<char> = name.chars().collect();
-    for len in (0..=chars.len()).rev() {
-        let candidate = format!("{}...", chars[..len].iter().collect::<String>());
-        if measure_text(&candidate) <= max_width {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-fn measure_text(text: &str) -> f64 {
-    let Ok(font) = FontRef::new(LIBERATION_SANS_REGULAR) else {
-        return 0.0;
-    };
+    let font = FontRef::new(LIBERATION_SANS_REGULAR).ok()?;
     let charmap = font.charmap();
     let metrics = font.glyph_metrics(
         Size::new(FRAME_NAME_FONT_SIZE as f32),
         LocationRef::default(),
     );
-    text.chars()
-        .filter_map(|ch| {
-            charmap
-                .map(ch)
-                .or_else(|| (!ch.is_whitespace() && !ch.is_control()).then_some(GlyphId::NOTDEF))
-        })
-        .filter_map(|glyph| metrics.advance_width(glyph))
-        .sum::<f32>() as f64
+    let advance = |ch: char| {
+        charmap
+            .map(ch)
+            .or_else(|| (!ch.is_whitespace() && !ch.is_control()).then_some(GlyphId::NOTDEF))
+            .and_then(|glyph| metrics.advance_width(glyph))
+            .unwrap_or(0.0) as f64
+    };
+    let line_width = |line: &str| line.chars().map(advance).sum::<f64>();
+    let max_width = element.width.max(0.0);
+    let widest_line = name.split('\n').map(line_width).fold(0.0, f64::max);
+    if widest_line <= max_width {
+        return Some(name);
+    }
+
+    let ellipsis_width = line_width("...");
+    let mut completed_width = 0.0_f64;
+    let mut current_width = 0.0_f64;
+    let mut prefix_end = None;
+    for (index, ch) in name.char_indices() {
+        if ch == '\n' {
+            completed_width = completed_width.max(current_width);
+            current_width = 0.0;
+            if completed_width.max(ellipsis_width) <= max_width {
+                prefix_end = Some(index + 1);
+            }
+        } else {
+            current_width += advance(ch);
+            if completed_width.max(current_width + ellipsis_width) <= max_width {
+                prefix_end = Some(index + ch.len_utf8());
+            }
+        }
+        if completed_width.max(current_width) > max_width {
+            break;
+        }
+    }
+    prefix_end.map(|end| format!("{}...", &name[..end]))
 }
 
 fn rounded_rect_ops(x: f64, y: f64, width: f64, height: f64, radius: f64) -> Vec<PathOp> {

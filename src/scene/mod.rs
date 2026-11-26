@@ -119,7 +119,7 @@ pub enum Primitive {
 }
 
 /// A containing frame's clip in scene coordinates, before its own rotation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FrameClip {
     pub ops: Vec<PathOp>,
     pub rotation_deg: f64,
@@ -139,6 +139,8 @@ pub struct Drawable {
     pub rotation_deg: f64,
     pub center: (f64, f64),
     pub frame_clip: Option<FrameClip>,
+    /// Opacity inherited from a containing frame, before combining with the element's opacity.
+    pub frame_opacity: Option<f64>,
 }
 
 pub struct Scene {

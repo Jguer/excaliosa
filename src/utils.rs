@@ -227,13 +227,13 @@ pub fn calculate_viewbox(elements: &[ExcalidrawElement]) -> ViewBox {
         }
         if matches!(el.element_type.as_str(), "frame" | "magicframe") {
             // Synthesized frame names stay horizontal and above the saved box.
-            let name_y = el.y
-                - crate::scene::frame::FRAME_NAME_OFFSET_Y
-                - crate::scene::frame::FRAME_NAME_BAND_HEIGHT;
-            min_x = min_x.min(el.x);
-            min_y = min_y.min(name_y);
-            max_x = max_x.max(el.x + el.width);
-            max_y = max_y.max(el.y - crate::scene::frame::FRAME_NAME_OFFSET_Y);
+            if let Some(title) = crate::scene::frame::frame_title(el) {
+                let lines = title.content.split('\n').count() as f64;
+                min_x = min_x.min(title.x);
+                min_y = min_y.min(title.y);
+                max_x = max_x.max(title.x + title.container_width);
+                max_y = max_y.max(title.y + title.line_height * lines);
+            }
         }
     }
 

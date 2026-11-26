@@ -84,7 +84,9 @@ pub fn build_scene(data: &ExcalidrawData, background: Option<Rgba>) -> Scene {
             && let Some(mut drawable) = build_element(&generator, el, &data.files, background)
         {
             if let Some(frame) = containing_frame(el, &elements) {
-                drawable.opacity *= (frame.opacity / 100.0).clamp(0.0, 1.0);
+                let frame_opacity = (frame.opacity / 100.0).clamp(0.0, 1.0);
+                drawable.opacity *= frame_opacity;
+                drawable.frame_opacity = Some(frame_opacity);
                 drawable.frame_clip = frame_clip(el, frame, &elements);
             }
             drawables.push(drawable);
@@ -170,6 +172,7 @@ pub(super) fn drawable(el: &ExcalidrawElement, primitive: Primitive) -> Drawable
         rotation_deg: el.angle.to_degrees(),
         center,
         frame_clip: None,
+        frame_opacity: None,
     }
 }
 

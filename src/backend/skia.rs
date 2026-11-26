@@ -89,6 +89,7 @@ pub fn render_to_png(
     let base = Transform::from_scale(scale as f32, scale as f32)
         .pre_translate(-vb.min_x as f32, -vb.min_y as f32);
 
+    let mut cached_mask: Option<(&FrameClip, Mask)> = None;
     for drawable in &scene.drawables {
         let tf = if drawable.rotation_deg != 0.0 {
             base.pre_concat(Transform::from_rotate_at(
@@ -100,22 +101,33 @@ pub fn render_to_png(
             base
         };
 
-        // A temporary output-bounded mask avoids retaining a full raster per frame.
-        let mask = drawable
-            .frame_clip
-            .as_ref()
-            .and_then(|clip| build_frame_mask(width, height, base, clip));
+        let mask = if let Some(clip) = drawable.frame_clip.as_ref() {
+            if cached_mask
+                .as_ref()
+                .is_none_or(|(cached, _)| *cached != clip)
+            {
+                cached_mask = build_frame_mask(width, height, base, clip).map(|mask| (clip, mask));
+            }
+            cached_mask.as_ref().map(|(_, mask)| mask)
+        } else {
+            None
+        };
         match &drawable.primitive {
+            Primitive::Paths(paths)
+                if drawable
+                    .frame_opacity
+                    .is_some_and(|opacity| (opacity - 1.0).abs() > 1e-9) =>
+            {
+                for path in paths {
+                    draw_painted(&mut pixmap, path, tf, drawable.opacity, mask);
+                }
+            }
             Primitive::Paths(paths) => {
-                draw_paths(&mut pixmap, paths, tf, drawable.opacity, mask.as_ref())
+                draw_paths(&mut pixmap, paths, tf, drawable.opacity, mask)
             }
-            Primitive::Text(text) => {
-                draw_text(&mut pixmap, text, tf, drawable.opacity, mask.as_ref())
-            }
-            Primitive::Image(image) => {
-                draw_image(&mut pixmap, image, tf, drawable.opacity, mask.as_ref())
-                    .context("Failed to render embedded PNG image")?
-            }
+            Primitive::Text(text) => draw_text(&mut pixmap, text, tf, drawable.opacity, mask),
+            Primitive::Image(image) => draw_image(&mut pixmap, image, tf, drawable.opacity, mask)
+                .context("Failed to render embedded PNG image")?,
         }
     }
 
@@ -139,7 +151,7 @@ fn draw_paths(
     }
     if opacity >= 1.0 {
         for path in paths {
-            draw_painted(pixmap, path, transform, mask);
+            draw_painted(pixmap, path, transform, 1.0, mask);
         }
         return;
     }
@@ -187,7 +199,7 @@ fn draw_paths(
     };
     let layer_transform = transform.post_translate(-left as f32, -top as f32);
     for path in paths {
-        draw_painted(&mut layer, path, layer_transform, None);
+        draw_painted(&mut layer, path, layer_transform, 1.0, None);
     }
     let paint = PixmapPaint {
         opacity: opacity as f32,
@@ -207,6 +219,7 @@ fn draw_painted(
     pixmap: &mut Pixmap,
     pp: &PaintedPath,
     transform: Transform,
+    opacity: f64,
     mask: Option<&Mask>,
 ) {
     let Some(path) = build_path(&pp.ops) else {
@@ -214,7 +227,7 @@ fn draw_painted(
     };
 
     if let Some(fill) = pp.fill {
-        let (r, g, b, a) = (fill.0, fill.1, fill.2, fill.3);
+        let (r, g, b, a) = apply_opacity(fill, opacity);
         if a > 0 {
             let mut paint = Paint::default();
             paint.set_color_rgba8(r, g, b, a);
@@ -229,7 +242,7 @@ fn draw_painted(
     }
 
     if let Some(stroke) = pp.stroke {
-        let (r, g, b, a) = (stroke.0, stroke.1, stroke.2, stroke.3);
+        let (r, g, b, a) = apply_opacity(stroke, opacity);
         if a > 0 && pp.stroke_width > 0.0 {
             let mut paint = Paint::default();
             paint.set_color_rgba8(r, g, b, a);
